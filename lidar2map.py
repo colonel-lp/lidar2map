@@ -3486,6 +3486,25 @@ def _parser_departements(valeur: str) -> list:
     return codes
 
 
+def _parse_block(spec: str):
+    """Parse --block 'i/M' → (i, M) validés, ou None si vide.
+
+    Sharding géographique INTER-machines : on découpe la zone en M blocs et ce
+    run ne traite que le i-ème. 1 ≤ i ≤ M, M ≥ 1 (ex. '1/3' = 1er tiers). Lève
+    ValueError sur un format invalide (l'appelant convertit en erreur propre)."""
+    import re
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    m = re.match(r'^(\d+)\s*/\s*(\d+)$', spec)
+    if not m:
+        raise ValueError(f"--block attend le format 'i/M' (ex: 1/3), reçu : {spec!r}")
+    i, total = int(m.group(1)), int(m.group(2))
+    if total < 1 or not (1 <= i <= total):
+        raise ValueError(f"--block {spec} : il faut 1 ≤ i ≤ M et M ≥ 1")
+    return i, total
+
+
 # ============================================================
 # GRILLE DE DALLES
 # ============================================================
@@ -9801,6 +9820,11 @@ Examples:
     grp_priori.add_argument("--split-width", "--split-largeur", type=float, default=0.0, metavar="KM",
                             dest="split_width",
                             help="Alternative: split into ~KM km squares (KM = the side).")
+    grp_priori.add_argument("--block", "--bloc", default="", metavar="i/M", dest="block",
+                            help="Process only block i of M: M-way geographic split of the "
+                                 "zone, this run does block i only. For sharding one area "
+                                 "across several machines (same command each, only i changes). "
+                                 "Composes with --split-width (internal chunking of the block).")
     grp_priori.add_argument("--cleanup", "--nettoyage", action="store_true", dest="nettoyage",
                             help="Delete intermediate tiles + TIFs after each chunk. "
                                  "Essential for large areas (a whole department).")
@@ -10323,6 +10347,27 @@ Examples:
         _common_par.set_laz_parallelism(args.laz_parallel)
         print(f"  LAZ parallel : {args.laz_parallel} conversions simultanees "
               f"x {_omp} threads OMP ({_cores} coeurs) — prevoir ~{3*args.laz_parallel} Go RAM")
+
+    # --block i/M : sharding géographique INTER-machines (distinct du découpage
+    # interne --split-*). On restreint la bbox du run au i-ème des M blocs (le
+    # chemin n_morceaux de _calculer_sous_zones_priori divise le rectangle
+    # proportionnellement → CRS-agnostique), et on suffixe le nom de zone en
+    # _b{i} pour que les M sorties (une par machine) ne se collisionnent pas.
+    # Composable avec --split-width, qui re-découpe CE bloc sur la machine. Locus
+    # réassemble les mbtiles des blocs (jointives, géoréférencées).
+    try:
+        _blk = _parse_block(getattr(args, "block", ""))
+    except ValueError as _e_blk:
+        print(f"  ERROR: {_e_blk}"); sys.exit(1)
+    if _blk and not _osm_seul:
+        _bi, _bM = _blk
+        _blocs, _ = _calculer_sous_zones_priori(
+            bbox[0], bbox[1], bbox[2], bbox[3], _bM, 0.0, unite_m=True)
+        _z = _blocs[_bi - 1]                       # (i_lat, i_lon, xw, ys, xe, yn)
+        bbox = (_z[2], _z[3], _z[4], _z[5])
+        nom_zone = f"{nom_zone}_b{_bi}"
+        print(f"  Block {_bi}/{_bM} ({len(_blocs)} blocs): this run = bbox "
+              f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f} → project {nom_zone}")
 
     # ── A-priori splitting: traitement séquentiel morceau par morceau ────────
     _cols_pr  = getattr(args, "cols_decoupe", 0) or 0

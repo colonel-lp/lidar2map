@@ -368,6 +368,16 @@ bash tools/run_on_vm.sh user@host "--lidar --laz --zone-department 83 --download
 
 Idempotent: it clones or `git pull`s, skips the install when already present, and does not start a second run if one is already going. Key-based SSH is assumed (the Hetzner default).
 
+**Shard one area across several machines.** `--block i/M` restricts a run to the i-th of M equal geographic blocks of the zone. Launch the same command on M machines, changing only `i` and the host (so M distinct IPs and M distinct block numbers, one pair per machine):
+
+```bash
+bash tools/run_on_vm.sh vm1 "--lidar --laz --zone-department 83 --block 1/3 --download --split-width 5 --cleanup --min-free-gb 20 --shading lrm:sigma=4 --file-formats mbtiles"
+bash tools/run_on_vm.sh vm2 "--lidar --laz --zone-department 83 --block 2/3 --download --split-width 5 --cleanup --min-free-gb 20 --shading lrm:sigma=4 --file-formats mbtiles"
+bash tools/run_on_vm.sh vm3 "--lidar --laz --zone-department 83 --block 3/3 --download --split-width 5 --cleanup --min-free-gb 20 --shading lrm:sigma=4 --file-formats mbtiles"
+```
+
+The M blocks tile the zone exactly (no overlap), and `--block` composes with `--split-width` (each machine still chunks its own block for disk). The point: the national LiDAR download is throttled per IP (~3 parallel for IGN), so M machines on M IPs multiply the aggregate bandwidth and cut a wall-clock that a single bigger VM cannot beat. Collect the M output sets afterwards (one `scp` per machine); they are separate MBTiles that Locus Map reassembles seamlessly (geo-referenced, adjacent).
+
 ## LiDAR providers, adding a country
 
 The provider abstraction lets you add a national LiDAR source without touching the core of the pipeline. Each provider lives in `providers/<code>.py` (~50-200 lines) and exposes:

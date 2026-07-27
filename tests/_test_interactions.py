@@ -965,6 +965,29 @@ check("_cfg_depuis_argv : zone_width/split_width_l/laz_parallel, pas d'ex-clés"
 _sz, _ = l2m._calculer_sous_zones_priori(0, 0, 10000, 10000, 0, 5, unite_m=True)
 check("découpe : côté 5 km → 2×2 morceaux de 5000 m (côté)",
       len(_sz) == 4 and (_sz[0][4] - _sz[0][2]) == 5000)
+
+# --block i/M : sharding géographique INTER-machines (2026-07-27). Découpe la
+# zone en M blocs, ce run ne traite que le i-ème ; composable avec --split-width
+# (chunking interne du bloc). Pour distribuer un département sur plusieurs VM.
+check("CLI : --block déclaré (i/M) et câblé dans le main (sélection + suffixe _b)",
+      '"--block"' in _src and '"--bloc"' in _src
+      and "def _parse_block(" in _src
+      and "_parse_block(getattr(args" in _src
+      and 'nom_zone = f"{nom_zone}_b{_bi}"' in _src)
+def _rej(fn, val):
+    try:
+        fn(val); return False
+    except ValueError:
+        return True
+check("--block : _parse_block valide 'i/M' et rejette les formes fausses",
+      l2m._parse_block("1/3") == (1, 3) and l2m._parse_block("") is None
+      and all(_rej(l2m._parse_block, b) for b in ("3/2", "0/3", "1", "1/0", "x")))
+# Partition : M blocs pavent EXACTEMENT la bbox (ni trou ni chevauchement) et
+# l'indexation est déterministe → 3 VM couvrent tout le département une fois.
+_blk3, _ = l2m._calculer_sous_zones_priori(0.0, 0.0, 3000.0, 3000.0, 3, 0.0, unite_m=True)
+check("--block : 3 blocs pavent exactement la bbox (aire conservée, sans overlap)",
+      len(_blk3) == 3
+      and abs(sum((z[4] - z[2]) * (z[5] - z[3]) for z in _blk3) - 3000.0 * 3000.0) < 1e-6)
 # GUI : migration historique rayon→largeur + champs renommés + laz-parallel.
 check("GUI : migration rayon→largeur (2×) au chargement d'un vieux projet",
       "cfg.zone_width = cfg.rayon * 2" in _appjs
