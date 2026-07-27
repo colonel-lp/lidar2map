@@ -1478,17 +1478,36 @@ class LazProvider:
         if epsg is not None:
             self.crs_epsg = int(epsg)
 
-    def _cloud_path(self, chemin, m):
-        """Chemin du nuage .laz. Avec cloud_cache_dir posé, il vit sous
-        <cache>/<colonne>/ indépendamment du dossier du .tif (produit → production) ;
-        sinon co-localisé avec le .tif (parent), comme avant."""
+    def _cloud_path_pur(self, chemin, m):
+        """Chemin du nuage .laz, SANS effet de bord (aucun mkdir). Avec
+        cloud_cache_dir posé, il vit sous <cache>/<colonne>/ indépendamment du
+        dossier du .tif (produit → production) ; sinon co-localisé avec le .tif
+        (parent), comme avant."""
         if m is None:
             return chemin.with_suffix(".laz")
         if self.cloud_cache_dir is not None:
-            d = self.cloud_cache_dir / self.dalle_subdir(m.group(1))
-            d.mkdir(parents=True, exist_ok=True)
-            return d / self.laz_filename(m.group(1), m.group(2))
+            return (self.cloud_cache_dir / self.dalle_subdir(m.group(1))
+                    / self.laz_filename(m.group(1), m.group(2)))
         return chemin.parent / self.laz_filename(m.group(1), m.group(2))
+
+    def _cloud_path(self, chemin, m):
+        """Comme _cloud_path_pur mais crée le dossier cache au besoin — chemin
+        d'ÉCRITURE (post_fetch/_extract_cloud y déplacent le nuage)."""
+        p = self._cloud_path_pur(chemin, m)
+        if m is not None and self.cloud_cache_dir is not None:
+            p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def cloud_path(self, chemin_tif):
+        """PUBLIC : chemin du nuage .laz gardé pour la dalle `chemin_tif`, ou None
+        si le nom n'est pas reconnu. Query PURE (aucun mkdir). Sert au cœur pour
+        déclarer le nuage au manifeste de --nettoyage depuis le main thread :
+        post_fetch (qui produit le .laz) tourne dans un worker du pool, or
+        _manifest_ctx est thread-local et n'y propage pas → la déclaration doit
+        venir du main thread, comme pour les .tif."""
+        chemin_tif = Path(chemin_tif)
+        m = self.nom_re.match(chemin_tif.name)
+        return None if m is None else self._cloud_path_pur(chemin_tif, m)
 
     def pre_download(self, chemin):
         """Hook cœur (avant réseau) : si le nuage de cette dalle est déjà en

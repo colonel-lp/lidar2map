@@ -160,13 +160,13 @@
        <input type="text" id="f-ville" placeholder="ex: Garéoult" autocomplete="off">
        <div id="f-ville-ac" class="ac-dropdown hidden" role="listbox"></div>
       </div>
-      <label style="min-width:auto" data-i18n="z.rayonkm">Rayon km</label>
-      <input type="number" id="f-rayon" value="10" min="0" max="500" class="inp-short">
+      <label style="min-width:auto" data-i18n="z.rayonkm">Largeur km</label>
+      <input type="number" id="f-largeur" value="20" min="0" max="500" class="inp-short">
      </span>
      <span class="z-zone hidden" id="z-gps">
       <input type="text" id="f-gps" placeholder="43.3156,6.0423" style="max-width:150px">
-      <label style="min-width:auto" data-i18n="z.rayonkm">Rayon km</label>
-      <input type="number" id="f-rayon-gps" value="10" min="0" max="500" class="inp-short">
+      <label style="min-width:auto" data-i18n="z.rayonkm">Largeur km</label>
+      <input type="number" id="f-largeur-gps" value="20" min="0" max="500" class="inp-short">
      </span>
      <span class="z-zone hidden" id="z-bbox">
       <input type="text" id="f-bbox" placeholder="5.9,43.1,6.6,43.8" style="max-width:190px">
@@ -255,7 +255,7 @@
           avec les défauts du jumeau Python (applyProviderLaz). -->
      <div class="row" id="laz-params" style="display:none"
           data-i18n-title="tip.laz" title="Reconstruit le modèle depuis le nuage de points classé (LAZ ~205 Mo/km²) : peut réintroduire les retours compatibles avec des ruines/murs debout que le MNT efface (candidats, pas une classification : le maquis revient aussi). Socle « classes sol » : 2/9/66 = terrain, les autres classes sont réinjectées dans les trous du sol. Socle « tissu CSF » : tissu simulé, sans les classes, fond plus propre, ~3 min/dalle. Zone petite conseillée.">
-      <label data-i18n="f.lazg">Socle</label>
+      <label data-i18n="f.lazg" style="min-width:auto">Socle</label>
       <select id="f-laz-ground" onchange="updateLazUI()" style="max-width:130px">
        <option value="classes" data-i18n="f.lazg.classes">classes sol</option>
        <option value="csf" data-i18n="f.lazg.csf">tissu CSF (~3 min/dalle)</option>
@@ -280,6 +280,13 @@
         <option value="3" data-i18n="f.lazrg.3">plat (3)</option>
        </select>
       </span>
+      <!-- Parallélisme de la CONVERSION nuage→DFM/CSF (post_fetch), sur la ligne
+           Socle : LAZ-only et indépendant de « Télécharger » (une reconversion
+           depuis le .laz caché en profite aussi). Borné (max 8) + RAM dans le
+           label = la garde ; ~3 Go/conversion, le cœur affiche l'estimation. -->
+      <label style="min-width:auto;margin-left:12px" data-i18n="lazpar">Nb conversions LAZ/TIF simultanées (×3 Go RAM)</label>
+      <input type="number" id="f-laz-parallel" value="1" min="1" max="8" class="inp-short"
+             data-i18n-title="tip.lazpar" title="Conversions CSF/DFM simultanées ; ~3 Go RAM chacune (défaut 1)">
      </div>
     </div>
    </div>
@@ -299,11 +306,11 @@
       <span class="hint" style="margin:0 4px">cols ×</span>
       <input type="number" id="f-priori-rows" value="1" min="1" max="50" class="inp-short" data-i18n-title="tip.rowsns" title="Lignes Nord-Sud">
       <span class="hint" style="margin:0 4px" data-i18n="rows">lignes</span>
-      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="orradius">ou rayon</span>
-      <input type="number" id="f-rayon-priori-l" value="0" min="0" step="10" class="inp-short" data-i18n-title="tip.radiuschunk1" title="Rayon km par morceau (alternative à la grille)">
+      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="orradius">ou côté</span>
+      <input type="number" id="f-largeur-priori-l" value="0" min="0" step="10" class="inp-short" data-i18n-title="tip.radiuschunk1" title="Côté (km) par morceau (alternative à la grille)">
       <span class="hint" style="margin-left:4px">km</span>
       <label style="min-width:auto;margin-left:16px"><input type="checkbox" id="f-nettoyage"> <span data-i18n="clean">Nettoyage intermédiaires</span></label>
-      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="minfree">min disque</span>
+      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="minfree">Espace disque restant minimum avant arrêt du calcul</span>
       <input type="number" id="f-min-free" value="0" min="0" step="10" class="inp-short" data-i18n-title="tip.minfree" title="Arrêt propre avant un chunk si disque libre &lt; seuil (0 = désactivé)">
       <span class="hint" style="margin-left:4px">GB</span>
      </div>
@@ -324,7 +331,7 @@
           reste propre au LiDAR : seul son GeoTIFF brut est compressible (les
           tuiles raster et le PBF OSM le sont déjà par nature). -->
      <div class="row">
-      <label data-i18n="workers">Workers :</label>
+      <label data-i18n="workers">Nb téléchargements simultanés</label>
       <input type="number" id="f-workers-l" value="8" min="1" max="32" class="inp-short">
       <label style="min-width:auto"><input type="checkbox" id="f-comp" checked> <span data-i18n="compress">Compresser</span></label>
      </div>
@@ -439,11 +446,11 @@
       <span class="hint" style="margin:0 4px">cols ×</span>
       <input type="number" id="f-priori-rows-s" value="1" min="1" max="50" class="inp-short" data-i18n-title="tip.rowsns" title="Lignes Nord-Sud">
       <span class="hint" style="margin:0 4px" data-i18n="rows">lignes</span>
-      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="orradius">ou rayon</span>
-      <input type="number" id="f-rayon-priori-s" value="0" min="0" step="10" class="inp-short" data-i18n-title="tip.radiuschunk2" title="Rayon km par morceau">
+      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="orradius">ou côté</span>
+      <input type="number" id="f-largeur-priori-s" value="0" min="0" step="10" class="inp-short" data-i18n-title="tip.radiuschunk2" title="Côté (km) par morceau">
       <span class="hint" style="margin-left:4px">km</span>
       <label style="min-width:auto;margin-left:16px"><input type="checkbox" id="f-nettoyage-s"> <span data-i18n="clean">Nettoyage intermédiaires</span></label>
-      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="minfree">min disque</span>
+      <span class="hint" style="margin:0 6px;color:var(--dim)" data-i18n="minfree">Espace disque restant minimum avant arrêt du calcul</span>
       <input type="number" id="f-min-free-s" value="0" min="0" step="10" class="inp-short" data-i18n-title="tip.minfree" title="Arrêt propre avant un chunk si disque libre &lt; seuil (0 = désactivé)">
       <span class="hint" style="margin-left:4px">GB</span>
      </div>
@@ -458,7 +465,7 @@
      <label style="margin-left:auto"><input type="checkbox" id="f-ecraser-tel-s"> <span data-i18n="ovr">Écraser le fichier résultat</span></label>
     </div>
     <div class="section-body" id="body-tel-s">
-     <div class="row"><label data-i18n="workers">Workers :</label>
+     <div class="row"><label data-i18n="workers">Nb téléchargements simultanés</label>
       <input type="number" id="f-workers-s" value="8" min="1" max="32" class="inp-short"></div>
     </div>
    </div>
@@ -555,7 +562,7 @@
     </div>
     <div class="section-body" id="body-tel-osm">
      <div class="row">
-      <label data-i18n="workers">Workers :</label>
+      <label data-i18n="workers">Nb téléchargements simultanés</label>
       <input type="number" id="f-workers-osm" value="4" min="1" max="16" class="inp-short">
      </div>
     </div>
@@ -587,7 +594,7 @@
     </div>
     <div class="section-body" id="body-tel-v">
      <div class="row">
-      <label data-i18n="workers">Workers :</label>
+      <label data-i18n="workers">Nb téléchargements simultanés</label>
       <!-- Le « max 4 » était un conseil affiché à côté d'un champ qui acceptait
            16 : contrainte dans le champ, motif dans l'infobulle, comme les
            autres bridages de l'interface. -->
@@ -704,8 +711,8 @@
       <input type="number" id="f-cols-decoupe" value="1" min="1" max="50" class="inp-short" data-i18n-title="tip.colsew2" title="Colonnes (Est-Ouest)">
       <span class="hint" style="margin:0 4px">cols ×</span>
       <input type="number" id="f-rows-decoupe" value="1" min="1" max="50" class="inp-short" data-i18n-title="tip.rowsns2" title="Lignes (Nord-Sud)">
-      <span class="hint" style="margin:0 4px">lignes  ou rayon</span>
-      <input type="number" id="f-rayon-decoupe-d" value="0" min="0" step="10" class="inp-short">
+      <span class="hint" style="margin:0 4px">lignes  ou côté</span>
+      <input type="number" id="f-largeur-decoupe-d" value="0" min="0" step="10" class="inp-short">
       <span class="hint" style="margin-left:4px">km</span>
      </div>
      <div class="row">

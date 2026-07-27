@@ -55,7 +55,7 @@ const I18N = {
     "f.zoomcap":"z%d = résolution native (%s) — au-delà, agrandissement sans information",
     "f.dlcap":"↓ %d max en parallèle (gros nuages LAZ)",
     "f.lazh":"hauteur (m)", "f.lazc":"classes LAS",
-    "f.lazg":"socle", "f.lazg.classes":"classes sol", "f.lazg.csf":"tissu CSF (~3 min/dalle)",
+    "f.lazg":"Socle", "f.lazg.classes":"classes sol", "f.lazg.csf":"tissu CSF (~3 min/dalle)",
     "f.lazt":"seuil (m)", "f.lazr":"maille (m)", "f.lazrg":"terrain",
     "f.lazrg.1":"pentu (1)", "f.lazrg.2":"relief doux (2)", "f.lazrg.3":"plat (3)",
     "tip.laz":"Reconstruit le modèle depuis le nuage de points classé (LAZ ~205 Mo/km²) : peut réintroduire les retours compatibles avec des ruines/murs debout que le MNT efface (candidats, pas une classification : le maquis revient aussi — mouchetis vs lignes continues). Socle « classes sol » : 2/9/66 = terrain, les autres classes sont réinjectées dans les trous du sol, filtrées par la tranche de hauteur. Socle « tissu CSF » : un tissu simulé (Zhang 2016) sépare sol et sursol sans les classes ; fond plus propre, ~3 min/dalle, réglages propres seuil/maille/terrain (hauteur/classes ignorés). Zone petite conseillée.",
@@ -63,7 +63,7 @@ const I18N = {
     "sec.zone":"Zone géographique",
     "z.mode":"Zone", "mode.fronly":"France uniquement",
     "mode.ville":"Ville", "mode.gps":"GPS", "mode.bbox":"BBox", "mode.dep":"Department", "mode.region":"Région",
-    "z.ville":"Ville", "z.rayonkm":"Rayon km", "z.gps":"GPS lat,lon", "z.bbox":"BBox W,S,E,N",
+    "z.ville":"Ville", "z.rayonkm":"Largeur km", "z.gps":"GPS lat,lon", "z.bbox":"BBox W,S,E,N",
     "z.deps":"Department(s)",
     // Type de traitement
     "sec.type":"Type de traitement de carte",
@@ -75,13 +75,14 @@ const I18N = {
     "t.fusion":"Fusion vectorielle", "t.decoupe":"Découpage raster",
     // Étapes communes
     "split0":"0 — Découpage à priori (grandes zones)",
-    "grid":"Grille :", "rows":"lignes", "orradius":"ou rayon", "rows_orradius":"lignes  ou rayon",
+    "grid":"Grille :", "rows":"lignes", "orradius":"ou côté", "rows_orradius":"lignes  ou côté",
     "clean":"Nettoyage intermédiaires",
-    "minfree":"min disque", "tip.minfree":"Arrêt propre avant un chunk si disque libre < seuil (0 = désactivé)",
+    "minfree":"Espace disque restant minimum avant arrêt du calcul", "tip.minfree":"Arrêt propre avant un chunk si disque libre < seuil (0 = désactivé)",
     "split.hint":"1×1 = pas de découpage — reprise automatique via manifeste.json",
     "dl":"1 — Télécharger",
     "ovr":"Écraser le fichier résultat", "ovr.short":"Écraser",
-    "workers":"Workers :", "compress":"Compresser",
+    "workers":"Nb téléchargements simultanés", "compress":"Compresser",
+    "lazpar":"Nb conversions LAZ/TIF simultanées (×3 Go RAM)", "tip.lazpar":"Conversions CSF/DFM simultanées ; ~3 Go RAM chacune (défaut 1)",
     // Un seul nom pour l'étape de production : les sorties sont hétérogènes
     // (tuiles raster mbtiles/rmap/sqlitedb, carte vecteur Mapsforge, GeoJSON).
     // « Calculer les tuiles » n'était exact que pour les sorties raster.
@@ -150,7 +151,7 @@ const I18N = {
     "tip.deps":"Un ou plusieurs départements\nExemples : 83 | 83,06,13 | 1-10 | 1-3,75,83 | 2A | 971",
     "tip.colsew":"Colonnes Est-Ouest", "tip.rowsns":"Lignes Nord-Sud",
     "tip.colsew2":"Colonnes (Est-Ouest)", "tip.rowsns2":"Lignes (Nord-Sud)",
-    "tip.radiuschunk1":"Rayon km par morceau (alternative à la grille)", "tip.radiuschunk2":"Rayon km par morceau",
+    "tip.radiuschunk1":"Côté (km) par morceau (alternative à la grille)", "tip.radiuschunk2":"Côté (km) par morceau",
     "tip.epsilon":"Epsilon Douglas-Peucker en mètres. Vide = auto depuis surface.",
     // Panneaux historique / log
     "hist.title":"Historique des traitements", "clear":"🗑 Vider", "log.copy":"⎘ Copier",
@@ -188,14 +189,14 @@ const I18N = {
     "f.zoomcap":"z%d = native resolution (%s) — beyond that, upscaling with no extra information",
     "f.dlcap":"↓ %d max parallel (large LAZ clouds)",
     "f.lazh":"height (m)", "f.lazc":"LAS classes",
-    "f.lazg":"ground base", "f.lazg.classes":"ground classes", "f.lazg.csf":"CSF cloth (~3 min/tile)",
+    "f.lazg":"Ground base", "f.lazg.classes":"ground classes", "f.lazg.csf":"CSF cloth (~3 min/tile)",
     "f.lazt":"threshold (m)", "f.lazr":"cloth cell (m)", "f.lazrg":"terrain",
     "f.lazrg.1":"steep (1)", "f.lazrg.2":"gentle relief (2)", "f.lazrg.3":"flat (3)",
     "tip.laz":"Rebuilds the model from the classified point cloud (LAZ ~205 MB/km²): can re-introduce returns compatible with standing ruins/walls that the DTM erases (candidates, not a classifier — scrub comes back too: speckle vs continuous lines). \"ground classes\" base: 2/9/66 = terrain, other classes are re-injected into ground gaps, filtered by the height band. \"CSF cloth\" base: a simulated cloth (Zhang 2016) splits ground from off-ground without the classes; cleaner background, ~3 min/tile, its own threshold/cloth-cell/terrain settings (height/classes ignored). Keep the area small.",
     "sec.zone":"Geographic area",
     "z.mode":"Zone", "mode.fronly":"France only",
     "mode.ville":"City", "mode.gps":"GPS", "mode.bbox":"BBox", "mode.dep":"Department", "mode.region":"Region",
-    "z.ville":"City", "z.rayonkm":"Radius km", "z.gps":"GPS lat,lon", "z.bbox":"BBox W,S,E,N",
+    "z.ville":"City", "z.rayonkm":"Width km", "z.gps":"GPS lat,lon", "z.bbox":"BBox W,S,E,N",
     "z.deps":"Department(s)",
     "sec.type":"Map processing type",
     "t.lidar":"LiDAR", "t.raster":"Raster", "t.vect":"Vector",
@@ -203,13 +204,14 @@ const I18N = {
     "vsrc.ign":"IGN Géoplateforme (WFS)", "vsrc.osm":"OSM / Geofabrik (PBF)",
     "t.fusion":"Vector merge", "t.decoupe":"Raster split",
     "split0":"0 — A priori split (large areas)",
-    "grid":"Grid:", "rows":"rows", "orradius":"or radius", "rows_orradius":"rows  or radius",
+    "grid":"Grid:", "rows":"rows", "orradius":"or side", "rows_orradius":"rows  or side",
     "clean":"Clean intermediates",
-    "minfree":"min free disk", "tip.minfree":"Stop cleanly before a chunk if free disk < threshold (0 = off)",
+    "minfree":"Minimum free disk before halting", "tip.minfree":"Stop cleanly before a chunk if free disk < threshold (0 = off)",
     "split.hint":"1×1 = no split — automatic resume via manifeste.json",
     "dl":"1 — Download",
     "ovr":"Overwrite output file", "ovr.short":"Overwrite",
-    "workers":"Workers:", "compress":"Compress",
+    "workers":"Simultaneous downloads", "compress":"Compress",
+    "lazpar":"Simultaneous LAZ→TIF conversions (×3 GB RAM)", "tip.lazpar":"Simultaneous CSF/DFM conversions; ~3 GB RAM each (default 1)",
     "map2":"2 — Generate the map", "map3":"3 — Generate the map",
     "fmt.mapsforge":"Mapsforge (.map)", "fmt.natif":"(native)",
     "tip.natif":"Written directly by the WFS download: at least one of the two GeoJSON files is always produced, and the \"Overwrite\" box of the Download frame governs it.",
@@ -266,7 +268,7 @@ const I18N = {
     "tip.deps":"One or more departments\nExamples: 83 | 83,06,13 | 1-10 | 1-3,75,83 | 2A | 971",
     "tip.colsew":"Columns East-West", "tip.rowsns":"Rows North-South",
     "tip.colsew2":"Columns (East-West)", "tip.rowsns2":"Rows (North-South)",
-    "tip.radiuschunk1":"Radius km per chunk (alternative to the grid)", "tip.radiuschunk2":"Radius km per chunk",
+    "tip.radiuschunk1":"Chunk side in km (alternative to the grid)", "tip.radiuschunk2":"Chunk side in km",
     "tip.epsilon":"Douglas-Peucker epsilon in metres. Empty = auto from area.",
     "hist.title":"Processing history", "clear":"🗑 Clear", "log.copy":"⎘ Copy",
     "tip.logresize":"Resize vertically", "tip.logcopy":"Copy the log to the clipboard",
@@ -1725,7 +1727,7 @@ function getConfig() {
   // --osm) : le type effectif vient du sélecteur de source, dont les valeurs
   // SONT déjà 'vecteur' et 'osm'.
   if (type === 'vecteur') type = _vecteurSource();
-  const rayonId = mode === 'gps' ? 'f-rayon-gps' : 'f-rayon';
+  const largeurId = mode === 'gps' ? 'f-largeur-gps' : 'f-largeur';
 
   const cfg = {
     type, mode,
@@ -1757,12 +1759,13 @@ function getConfig() {
     bbox:   g('f-bbox')?.value.trim(),
     dep:    g('f-dep')?.value.trim(),
     region: g('f-region')?.value.trim(),
-    rayon:  parseFloat(g(rayonId)?.value ?? 10),
+    zone_width: parseFloat(g(largeurId)?.value ?? 20),
     // LiDAR
     tel:           g('f-tel')?.checked,
     comp:          g('f-comp')?.checked,
     ecraser_tel:   g('f-ecraser-tel')?.checked,
     workers_l:     parseInt(g('f-workers-l')?.value) || 8,
+    laz_parallel:  parseInt(g('f-laz-parallel')?.value) || 1,
     no_omb:        g('f-no-omb')?.checked,
     // Shuttle list : les instances paramétrées remplacent les cases à cocher.
     // ombrages reste émis vide pour compat avec les vieux lecteurs de cfg.
@@ -1791,8 +1794,8 @@ function getConfig() {
     rows_decoupe:  parseInt(g('f-priori-rows')?.value)   || 0,
     cols_decoupe_s:parseInt(g('f-priori-cols-s')?.value) || 0,
     rows_decoupe_s:parseInt(g('f-priori-rows-s')?.value) || 0,
-    rayon_decoupe_l: parseFloat(g('f-rayon-priori-l')?.value) || 0,
-    rayon_decoupe_s: parseFloat(g('f-rayon-priori-s')?.value) || 0,
+    split_width_l: parseFloat(g('f-largeur-priori-l')?.value) || 0,
+    split_width_s: parseFloat(g('f-largeur-priori-s')?.value) || 0,
     nettoyage:     g('f-nettoyage')?.checked || g('f-nettoyage-s')?.checked || false,
     min_free_gb:   parseFloat(g('f-min-free')?.value) || parseFloat(g('f-min-free-s')?.value) || 0,
     purger_inv:    false, purger_zone: false,
@@ -1844,7 +1847,7 @@ function getConfig() {
     source_decoupe:  g('f-source-decoupe')?.value.trim(),
     cols_decoupe_d:  parseInt(g('f-cols-decoupe')?.value) || 1,
     rows_decoupe_d:  parseInt(g('f-rows-decoupe')?.value) || 1,
-    rayon_decoupe_d: parseFloat(g('f-rayon-decoupe-d')?.value) || 0,
+    split_width_d: parseFloat(g('f-largeur-decoupe-d')?.value) || 0,
     mbtiles_d:       g('f-mbtiles-d')?.checked,
     rmap_d:          g('f-rmap-d')?.checked,
     sqlitedb_d:      g('f-sqlitedb-d')?.checked,
@@ -1884,6 +1887,21 @@ function loadConfig(cfg) {
     if (fs) fs.textContent = t('zoom.inverted');
   }
 
+  // Migration rayon -> largeur (côté du carré). Les entrées d'historique
+  // d'avant le passage au modèle "largeur" stockent un RAYON zone (cfg.rayon)
+  // et un côté de découpe sous cfg.rayon_decoupe_*. Zone : largeur = 2*rayon
+  // (10 km de rayon = 20 km de large). Découpe : la valeur ÉTAIT déjà le côté,
+  // simple renommage de clé. Upgrade ponctuel, pas d'alias permanent.
+  if (cfg.zone_width === undefined && typeof cfg.rayon === 'number') {
+    cfg.zone_width = cfg.rayon * 2;
+  }
+  for (const suf of ['l', 's', 'd']) {
+    const old = cfg['rayon_decoupe_' + suf];
+    if (cfg['split_width_' + suf] === undefined && typeof old === 'number') {
+      cfg['split_width_' + suf] = old;
+    }
+  }
+
   // Zone
   // Le mode est passé du radio à une liste : on pose la valeur, applyMode()
   // est rappelée plus bas comme avant (poser .value ne tire pas 'change').
@@ -1920,8 +1938,8 @@ function loadConfig(cfg) {
   s('f-bbox',    cfg.bbox);
   s('f-dep',     cfg.dep);
   s('f-region',  cfg.region);
-  s('f-rayon',     cfg.rayon);
-  s('f-rayon-gps', cfg.rayon);
+  s('f-largeur',     cfg.zone_width);
+  s('f-largeur-gps', cfg.zone_width);
 
 
   // LiDAR
@@ -1932,6 +1950,7 @@ function loadConfig(cfg) {
   // transformerait l'ancien défaut en opt-out permanent pour tout le monde.
   s('f-ecraser-tel',    cfg.ecraser_tel);          // FIX: était cfg.ecraser_tel_l
   s('f-workers-l',      cfg.workers_l);
+  s('f-laz-parallel',   cfg.laz_parallel);
   s('f-no-omb',         cfg.no_omb);
   // f-elevation / f-svf-* (y compris sweep) : champs globaux remplacés par
   // les paramètres par instance (cfg.shading_specs, restaurés plus bas).
@@ -1953,8 +1972,8 @@ function loadConfig(cfg) {
   s('f-priori-rows',   cfg.rows_decoupe);
   s('f-priori-cols-s', cfg.cols_decoupe_s);
   s('f-priori-rows-s', cfg.rows_decoupe_s);
-  s('f-rayon-priori-l', cfg.rayon_decoupe_l);
-  s('f-rayon-priori-s', cfg.rayon_decoupe_s);
+  s('f-largeur-priori-l', cfg.split_width_l);
+  s('f-largeur-priori-s', cfg.split_width_s);
   // FIX: f-nettoyage et f-nettoyage-s n'étaient jamais restaurés
   s('f-nettoyage',   cfg.nettoyage);
   s('f-nettoyage-s', cfg.nettoyage);
@@ -2022,7 +2041,7 @@ function loadConfig(cfg) {
   s('f-source-decoupe',  cfg.source_decoupe);
   s('f-cols-decoupe',  cfg.cols_decoupe_d);
   s('f-rows-decoupe',  cfg.rows_decoupe_d);
-  s('f-rayon-decoupe-d', cfg.rayon_decoupe_d);
+  s('f-largeur-decoupe-d', cfg.split_width_d);
   s('f-mbtiles-d',       cfg.mbtiles_d !== undefined ? cfg.mbtiles_d : true);
   s('f-rmap-d',          cfg.rmap_d);
   s('f-sqlitedb-d',      cfg.sqlitedb_d);
@@ -2530,7 +2549,7 @@ async function lancer() {
 function _signatureDalles(cfg) {
   return [cfg.provider || '', cfg.laz ? 'laz' : 'mnt', cfg.laz_ground || '',
           cfg.mode || '', cfg.ville || '', cfg.gps || '', cfg.bbox || '',
-          cfg.dep || '', cfg.region || '', cfg.rayon ?? ''].join('|');
+          cfg.dep || '', cfg.region || '', cfg.zone_width ?? ''].join('|');
 }
 
 async function lancerFile() {

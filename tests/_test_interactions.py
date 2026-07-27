@@ -936,6 +936,54 @@ _src = (_ROOT / "lidar2map.py").read_text(encoding="utf-8")
 check("_build_cmd traduit --laz/--laz-hmin/--laz-ground/--laz-csf-threshold",
       '"--laz"' in _src and '"--laz-hmin"' in _src and '"--laz-ground"' in _src
       and '"--laz-csf-threshold"' in _src)
+
+# ── Zone/découpe = LARGEUR (côté du carré), plus "rayon" (2026-07-27) ─────────
+# La valeur = le côté du carré, cohérent entre --zone-width et --split-width
+# (avant : --zone-radius était un demi-côté, --split-radius un côté entier, même
+# mot deux sens). Renommage CLEAN, sans alias déprécié (projet en construction).
+import sys as _sys
+check("CLI : flags largeur présents, noms 'radius/rayon' supprimés (pas d'alias)",
+      "--zone-width" in _src and "--zone-largeur" in _src
+      and "--split-width" in _src and "--split-largeur" in _src
+      and "--zone-radius" not in _src and "--zone-rayon" not in _src
+      and "--split-radius" not in _src and "--rayon-decoupe" not in _src)
+check("cœur : la largeur zone est un CÔTÉ → calculer_grille reçoit largeur/2",
+      "args.zone_width or 20.0" in _src and "largeur / 2.0" in _src)
+# Parse fonctionnel _cfg_depuis_argv : nouvelles clés, anciennes absentes.
+_argv_bak = _sys.argv
+try:
+    _sys.argv = ["x", "--ignlidar", "--zone-city", "G", "--zone-width", "20",
+                 "--split-width", "5", "--laz-parallel", "3", "--laz"]
+    _cfgw = l2m._cfg_depuis_argv()
+finally:
+    _sys.argv = _argv_bak
+check("_cfg_depuis_argv : zone_width/split_width_l/laz_parallel, pas d'ex-clés",
+      _cfgw.get("zone_width") == 20.0 and _cfgw.get("split_width_l") == 5.0
+      and _cfgw.get("laz_parallel") == 3
+      and "rayon" not in _cfgw and "rayon_decoupe_l" not in _cfgw)
+# Géométrie : --split-width 5 → morceaux de 5 km de CÔTÉ (pas rayon).
+_sz, _ = l2m._calculer_sous_zones_priori(0, 0, 10000, 10000, 0, 5, unite_m=True)
+check("découpe : côté 5 km → 2×2 morceaux de 5000 m (côté)",
+      len(_sz) == 4 and (_sz[0][4] - _sz[0][2]) == 5000)
+# GUI : migration historique rayon→largeur + champs renommés + laz-parallel.
+check("GUI : migration rayon→largeur (2×) au chargement d'un vieux projet",
+      "cfg.zone_width = cfg.rayon * 2" in _appjs
+      and "split_width_" in _appjs and "rayon_decoupe_" in _appjs)  # ancien lu, neuf écrit
+check("GUI : champs largeur (pas rayon) + laz-parallel câblé",
+      'id="f-largeur"' in _html and 'id="f-largeur-priori-l"' in _html
+      and 'id="f-laz-parallel"' in _html and 'id="f-rayon"' not in _html
+      and "laz_parallel:" in _appjs and '"--laz-parallel"' in _src)
+# --laz-parallel = conversion nuage→DFM/CSF, LAZ-only, INDÉPENDANT de Télécharger
+# (reconversion depuis le .laz caché sans re-download) : le champ vit DANS la row
+# laz-params (même ligne que « Socle »), pas dans le cadre de téléchargement. Les
+# enfants de la row sont des span/select, donc le 1er </div> après l'ouverture
+# ferme la row : f-laz-parallel doit tomber avant lui.
+_i_lazparams = _html.find('id="laz-params"')
+_i_row_close = _html.find('</div>', _i_lazparams)      # ferme la row laz-params
+_i_lazp = _html.find('id="f-laz-parallel"')
+_i_tel = _html.find('id="body-tel"')
+check("laz-parallel : sur la ligne Socle (dans la row laz-params), hors Télécharger",
+      0 < _i_lazparams < _i_lazp < _i_row_close < _i_tel)
 # --download-overwrite = VRAI re-download de la source (choix Nico) : le hook
 # pre_download (reconstruction depuis le LAZ caché) est SAUTÉ si ecraser, et les
 # deux flags overwrite convergent (_force_dl) dans le download de zone. Sans ça,
@@ -1032,7 +1080,7 @@ for _nom, _debut, _fin, _champs in (
 # file retélécharge exactement les mêmes (même provider × surface × zone).
 check("CLI : --cleanup-keep-tiles déclaré et câblé au nettoyage",
       "--cleanup-keep-tiles" in _src and "nettoyage_garder_dalles" in _src
-      and "def _supprimer_fichiers(" in _src and "dossier_dalles=None" in _src)
+      and "def _supprimer_fichiers(" in _src and "dossiers_garder" in _src)
 check("_build_cmd émet --cleanup-keep-tiles depuis cleanup_keep_tiles",
       'cfg.get("cleanup_keep_tiles")' in _src)
 check("app.js : la file ne garde les dalles que pour un groupe réutilisé",
@@ -1053,6 +1101,27 @@ with _tf.TemporaryDirectory() as _d:
     l2m._supprimer_fichiers([str(_dalle), str(_inter)], None)
     check("sans keep-tiles : tout est supprimé (comportement historique)",
           not _dalle.exists() and not _inter.exists())
+
+# Mode LAZ : le nuage .laz vit dans un cache SÉPARÉ du .tif produit. Sans
+# --cleanup-keep-tiles il doit être purgé (le disque saturait sinon : bug 2026-07-27) ;
+# avec, dalles ET nuages sont épargnés → dossiers_garder accepte une LISTE.
+with _tf.TemporaryDirectory() as _d:
+    _prod  = Path(_d) / "prod"  / "lidar"; _prod.mkdir(parents=True)
+    _cloud = Path(_d) / "cache" / "lidar"; _cloud.mkdir(parents=True)
+    _tif = _prod  / "fr_laz05_dfm_0958_6279.tif"
+    _laz = _cloud / "fr_laz05_0958_6279.laz"
+    _shade = Path(_d) / "lrm.tif"
+    def _reset_laz():
+        for _p in (_tif, _laz, _shade):
+            _p.parent.mkdir(parents=True, exist_ok=True); _p.write_bytes(b"x")
+    _reset_laz()
+    l2m._supprimer_fichiers([str(_tif), str(_laz), str(_shade)], None)
+    check("LAZ + --cleanup seul : le nuage .laz est supprimé (anti-saturation disque)",
+          not _laz.exists() and not _tif.exists() and not _shade.exists())
+    _reset_laz()
+    l2m._supprimer_fichiers([str(_tif), str(_laz), str(_shade)], [_prod, _cloud])
+    check("LAZ + keep-tiles : .tif ET .laz épargnés (2 caches), ombrage purgé",
+          _tif.exists() and _laz.exists() and not _shade.exists())
 
 print("== 9e. Uniformité « Source des données » sur les 4 onglets ==")
 # Chaque onglet producteur de carte expose D'ABORD sa source (quoi + d'où),

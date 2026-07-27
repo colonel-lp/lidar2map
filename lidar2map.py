@@ -94,7 +94,8 @@ Plateformes : Windows 10+, macOS 11+, Linux (Debian/Ubuntu testés).
   --zone-region SLUG          Région Geofabrik, ex: provence-alpes-cote-d-azur
                                 (emprise = bbox de ses départements ; avec
                                  --osm : une seule carte régionale, PBF complet)
-  --zone-rayon KM             Rayon autour du point (défaut: 10)
+  --zone-largeur KM           Largeur (côté du carré) de la zone autour du
+                                point, en km (défaut: 20)
   --zone-nom   NOM            Nom du dossier de sortie (ex: aa)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -209,7 +210,7 @@ Plateformes : Windows 10+, macOS 11+, Linux (Debian/Ubuntu testés).
     --zoom-max N                Zoom maximum MBTiles (défaut: 18)
     --cols-decoupe N            Découpe le MBTiles final en N colonnes (avec --rows-decoupe)
     --rows-decoupe N            Découpe le MBTiles final en N lignes   (avec --cols-decoupe)
-    --rayon-decoupe KM          Alternative : découpe en carrés de ~KM km
+    --split-largeur KM          Alternative : découpe en carrés de ~KM km de côté
     --source CHEMIN             Source alternative :
                                   .tif   → ombrage existant → tuilage direct
                                   .mbtiles → conversion → RMAP/SQLiteDB
@@ -300,7 +301,7 @@ Plateformes : Windows 10+, macOS 11+, Linux (Debian/Ubuntu testés).
     --workers N         Connexions parallèles (défaut: 8)
     --cols-decoupe N    Découpe le MBTiles final en N colonnes (avec --rows-decoupe)
     --rows-decoupe N    Découpe le MBTiles final en N lignes   (avec --cols-decoupe)
-    --rayon-decoupe KM  Alternative : découpe en carrés de ~KM km
+    --split-largeur KM  Alternative : découpe en carrés de ~KM km de côté
     --source CHEMIN     .mbtiles existant → conversion RMAP/SQLiteDB directe
 
   Arborescence de sortie :
@@ -488,37 +489,37 @@ Plateformes : Windows 10+, macOS 11+, Linux (Debian/Ubuntu testés).
   # Mode GUI
   python lidar2map.py
 
-  # LiDAR : zone 1 km, ombrage multi, MBTiles + RMAP + SQLiteDB
-  python lidar2map.py --ignlidar --zone-ville gareoult --zone-rayon 1 \
+  # LiDAR : zone 2 km, ombrage multi, MBTiles + RMAP + SQLiteDB
+  python lidar2map.py --ignlidar --zone-ville gareoult --zone-width 2 \
       --zone-nom aa --telechargement --ombrages multi \
       --formats-fichier mbtiles rmap sqlitedb --zoom-min 8 --zoom-max 18
 
-  # LiDAR : zone 10 km, plusieurs ombrages
-  python lidar2map.py --ignlidar --zone-ville gareoult --zone-rayon 10 \
+  # LiDAR : zone 20 km, plusieurs ombrages
+  python lidar2map.py --ignlidar --zone-ville gareoult --zone-width 20 \
       --zone-nom gareoult --telechargement --ombrages multi slope svf lrm \
       --formats-fichier mbtiles rmap --qualite-image 75
 
   # LiDAR : depuis TIF existant → RMAP uniquement
-  python lidar2map.py --ignlidar --zone-ville gareoult --zone-rayon 1 \
+  python lidar2map.py --ignlidar --zone-ville gareoult --zone-width 2 \
       --zone-nom aa --source ign_lidar/aa/_warped_aa_multi_ombrage_z18.tif \
       --formats-fichier rmap --zoom-min 8 --zoom-max 18
 
   # IGN Raster public (pas de clé requise)
-  python lidar2map.py --ignraster --zone-ville gareoult --zone-rayon 10 \
+  python lidar2map.py --ignraster --zone-ville gareoult --zone-width 20 \
       --zone-nom aa --couche planign \
       --formats-fichier mbtiles rmap --zoom-min 8 --zoom-max 18
 
   # IGN Raster Scan 25 (professionnel uniquement — clé API requise)
-  # python lidar2map.py --ignraster --zone-ville gareoult --zone-rayon 10 \
+  # python lidar2map.py --ignraster --zone-ville gareoult --zone-width 20 \
   #     --zone-nom aa --couche scan25 --apikey VOTRE_CLE_PRO \
   #     --formats-fichier mbtiles rmap --zoom-min 8 --zoom-max 18
 
   # Vecteur IGN : cadastre + hydrographie
-  python lidar2map.py --ignvecteur --zone-ville gareoult --zone-rayon 5 \
+  python lidar2map.py --ignvecteur --zone-ville gareoult --zone-width 10 \
       --zone-nom aa --couche cadastre cours_eau detail_hydro
 
   # OSM : carte rando + GeoJSON
-  python lidar2map.py --osm --zone-ville gareoult --zone-rayon 10 \
+  python lidar2map.py --osm --zone-ville gareoult --zone-width 20 \
       --zone-nom aa --couche "highway=* waterway=* natural=water" \
       --formats-fichier map gz
 
@@ -542,7 +543,7 @@ Plateformes : Windows 10+, macOS 11+, Linux (Debian/Ubuntu testés).
       --cols-decoupe 4 --rows-decoupe 4 --nettoyage
 
   # Linux/macOS : la commande est identique, sauf 'python' → 'python3'
-  python3 lidar2map.py --ignlidar --zone-ville Gareoult --zone-rayon 1 \
+  python3 lidar2map.py --ignlidar --zone-ville Gareoult --zone-width 2 \
       --ombrages svf --formats-fichier mbtiles
 """
 import os
@@ -1796,7 +1797,7 @@ if _SMOKETEST:
 
     _smk_nom     = "smoke"
     _smk_projets = _smk_work / "Projets" / _smk_nom
-    _smk_zone    = ["--zone-ville", "Gareoult", "--zone-rayon", "1",
+    _smk_zone    = ["--zone-ville", "Gareoult", "--zone-width", "2",
                     "--zone-nom",   _smk_nom]
 
     # (nom, args supplémentaires, outputs attendus relatifs à _smk_projets)
@@ -2115,7 +2116,7 @@ _HTTP_UA = "lidar2map/1.0 (IGN WMTS/WMS)"
 # par le check de mise à jour du GUI (Api.check_update) ET par le titre de la
 # fenêtre GUI (create_window). Le bump de release se fait ICI, nulle part
 # ailleurs (fini les 3 chaînes argparse à synchroniser).
-VERSION      = "1.29.0"
+VERSION      = "1.30.0"
 VERSION_DATE = "2026-07"
 
 
@@ -2321,11 +2322,11 @@ def _creer_fichiers(paths):
     m.enregistrer_fichiers(paths, cle)
 
 
-def _supprimer_fichiers(fichiers: list, dossier_dalles=None):
+def _supprimer_fichiers(fichiers: list, dossiers_garder=None):
     """
     Supprime tous les fichiers créés par un morceau (--nettoyage).
-    Cela inclut : dalles LiDAR, tuiles WMTS, TIF ombrages, TIF warpé.
-    Conserve uniquement les sorties finales (.mbtiles, .rmap, .sqlitedb).
+    Cela inclut : dalles LiDAR, nuages .laz cachés, tuiles WMTS, TIF ombrages,
+    TIF warpé. Conserve uniquement les sorties finales (.mbtiles, .rmap, .sqlitedb).
 
     But : permettre le traitement d'une grande BBox sans saturer le disque —
     chaque morceau libère son espace avant que le suivant démarre.
@@ -2334,25 +2335,38 @@ def _supprimer_fichiers(fichiers: list, dossier_dalles=None):
     manifest via _creer_fichier) sont removeds. Les fichiers déjà
     présents avant le début du morceau ne sont pas touchés.
 
-    *dossier_dalles* non nul (--cleanup-keep-tiles) : les fichiers situés sous
-    ce dossier (le cache de dalles, partagé entre runs) sont ÉPARGNÉS, les
-    autres intermédiaires sont supprimés normalement. Sert quand une tâche
-    ultérieure de la même file retraite la même zone : sans ça elle re-télécharge
-    intégralement des dalles qu'on vient d'effacer.
+    *dossiers_garder* non nul (--cleanup-keep-tiles) : un dossier OU un itérable
+    de dossiers dont les fichiers sont ÉPARGNÉS (le cache de dalles, et en mode
+    LAZ le cache de nuages .laz — partagés entre runs), les autres intermédiaires
+    supprimés normalement. Sert quand une tâche ultérieure de la même file
+    retraite la même zone : sans ça elle re-télécharge (ou reconvertit) des
+    dalles qu'on vient d'effacer.
     """
     suppr = 0
     gardees = 0
     dirs_a_verifier = set()
-    _cache = Path(dossier_dalles).resolve() if dossier_dalles else None
+    # Normaliser en liste de racines résolues à épargner (accepte Path unique,
+    # itérable, ou None). None dans l'itérable = ignoré (provider sans cache LAZ).
+    if dossiers_garder is None:
+        _caches = []
+    elif isinstance(dossiers_garder, (str, Path)):
+        _caches = [Path(dossiers_garder).resolve()]
+    else:
+        _caches = [Path(d).resolve() for d in dossiers_garder if d is not None]
     for chemin in fichiers:
         p = Path(chemin)
-        if _cache is not None:
-            try:
-                p.resolve().relative_to(_cache)
+        if _caches:
+            _epargne = False
+            for _c in _caches:
+                try:
+                    p.resolve().relative_to(_c)
+                    _epargne = True
+                    break
+                except (ValueError, OSError):
+                    continue      # hors de ce cache → tester le suivant
+            if _epargne:
                 gardees += 1
-                continue
-            except (ValueError, OSError):
-                pass          # hors cache de dalles → intermédiaire ordinaire
+                continue          # sous un cache épargné → intermédiaire gardé
         # Tous les fichiers du manifest sont intermédiaires.
         # Les sorties finales (.mbtiles, .rmap…) ne sont jamais enregistrées
         # via _creer_fichier → elles ne se retrouvent jamais ici.
@@ -9784,9 +9798,9 @@ Examples:
     grp_priori.add_argument("--split-rows", "--rows-decoupe", type=int, default=0, metavar="N",
                             dest="rows_decoupe",
                             help="Number of grid rows (North-South).")
-    grp_priori.add_argument("--split-radius", "--rayon-decoupe", type=float, default=0.0, metavar="KM",
-                            dest="rayon_decoupe",
-                            help="Alternative: split into ~KM km squares.")
+    grp_priori.add_argument("--split-width", "--split-largeur", type=float, default=0.0, metavar="KM",
+                            dest="split_width",
+                            help="Alternative: split into ~KM km squares (KM = the side).")
     grp_priori.add_argument("--cleanup", "--nettoyage", action="store_true", dest="nettoyage",
                             help="Delete intermediate tiles + TIFs after each chunk. "
                                  "Essential for large areas (a whole department).")
@@ -9806,7 +9820,7 @@ Examples:
     # Localisation + zone
     _ajouter_args_zone(
         parser,
-        rayon_default=None,
+        width_default=None,
         bbox_metavar="W,S,E,N",
         bbox_help="WGS84 bbox in degrees: lon_min,lat_min,lon_max,lat_max, "
                   "e.g. 5.9,43.1,6.6,43.8",
@@ -10134,7 +10148,7 @@ Examples:
         not args.zone_ville and not args.zone_gps and
         not getattr(args, "zone_region", None))
     if _source_tif_sans_zone:
-        print("  ERROR: --source TIF requires a zone: --zone-city/--zone-radius, --zone-bbox, --zone-department or --zone-region")
+        print("  ERROR: --source TIF requires a zone: --zone-city/--zone-width, --zone-bbox, --zone-department or --zone-region")
         sys.exit(1)
     if _migrer_seul and not args.zone_departement and not args.zone_bbox and not args.zone_ville and not args.zone_gps and not getattr(args, "zone_region", None):
         # Mode migration pure : on n'a besoin que de dossier_dalles
@@ -10286,11 +10300,12 @@ Examples:
             nom_zone = f"{nom_zone}_{_vtag}"
             print(f"  Variant mode ({_vtag}): project name -> {nom_zone}")
 
-    # Rayon + grille (modes ville / gps — pas bbox, dept, région, france).
-    # Rayon par defaut 10 km si --zone-radius absent (aucun prompt).
+    # Largeur + grille (modes ville / gps — pas bbox, dept, région, france).
+    # Largeur (côté du carré) par défaut 20 km si --zone-width absent (aucun
+    # prompt). calculer_grille prend une demi-étendue (rayon) → largeur/2.
     if not args.zone_bbox and not args.zone_departement and not getattr(args, "zone_region", None):
-        rayon = args.zone_rayon or 10.0
-        bbox = calculer_grille(cx, cy, rayon)
+        largeur = args.zone_width or 20.0
+        bbox = calculer_grille(cx, cy, largeur / 2.0)
 
     # --laz-parallel N : N conversions LAZ simultanees. On pose OMP_NUM_THREADS
     # (coeurs/N) AVANT le 1er import CSF (lazy) et on elargit le semaphore de
@@ -10312,11 +10327,11 @@ Examples:
     # ── A-priori splitting: traitement séquentiel morceau par morceau ────────
     _cols_pr  = getattr(args, "cols_decoupe", 0) or 0
     _rows_pr  = getattr(args, "rows_decoupe", 0) or 0
-    _rayon_pr = getattr(args, "rayon_decoupe", 0.0) or 0.0
-    if ((_cols_pr > 0 and _rows_pr > 0) or _rayon_pr > 0) and not _osm_seul:
+    _cote_pr  = getattr(args, "split_width", 0.0) or 0.0
+    if ((_cols_pr > 0 and _rows_pr > 0) or _cote_pr > 0) and not _osm_seul:
         sous_zones, mode_desc = _calculer_sous_zones_priori(
             bbox[0], bbox[1], bbox[2], bbox[3],
-            0, _rayon_pr, unite_m=True, n_cols=_cols_pr, n_rows=_rows_pr)
+            0, _cote_pr, unite_m=True, n_cols=_cols_pr, n_rows=_rows_pr)
         if len(sous_zones) > 1:
             racine_pr = (Path(args.dossier).resolve() if args.dossier
                          else DOSSIER_TRAVAIL / "Projets" / nom_zone / LIDAR_SUBDIR)
@@ -11036,7 +11051,7 @@ Examples:
 # ============================================================
 
 
-def _calculer_sous_zones_priori(x1, y1, x2, y2, n_morceaux, rayon_km, unite_m=True,
+def _calculer_sous_zones_priori(x1, y1, x2, y2, n_morceaux, cote_km, unite_m=True,
                                 n_cols=0, n_rows=0):
     """
     Divise une bbox en sous-zones pour le découpage à priori.
@@ -11047,9 +11062,10 @@ def _calculer_sous_zones_priori(x1, y1, x2, y2, n_morceaux, rayon_km, unite_m=Tr
     Priorité des modes (du plus explicite au plus implicite) :
       1. grille explicite n_cols × n_rows — respecte l'intention EXACTE de
          l'utilisateur (un produit premier comme 1×7 reste 1×7, pas refactorisé).
-      2. rayon_km — carrés ~KM uniformes : taille de chunk BORNÉE quelle que soit
-         l'étendue. Méthode recommandée pour les grandes couvertures (le pic
-         RAM/disque par chunk ne dérive pas avec la bbox totale).
+      2. cote_km — carrés de ~KM de CÔTÉ, uniformes : taille de chunk BORNÉE
+         quelle que soit l'étendue. Méthode recommandée pour les grandes
+         couvertures (le pic RAM/disque par chunk ne dérive pas avec la bbox
+         totale).
       3. n_morceaux — compte seul → grille refactorisée par ratio d'aspect
          (peut dégénérer en lanière si le compte est premier).
       4. zone entière.
@@ -11061,16 +11077,16 @@ def _calculer_sous_zones_priori(x1, y1, x2, y2, n_morceaux, rayon_km, unite_m=Tr
         dx = largeur / n_cols
         dy = hauteur / n_rows
         mode_desc = f"{n_cols * n_rows} morceaux ({n_rows}×{n_cols}, grille explicite)"
-    elif rayon_km > 0:
+    elif cote_km > 0:
         if unite_m:
-            dy = dx = rayon_km * 1000
+            dy = dx = cote_km * 1000
         else:
             lat_c = (y1 + y2) / 2
-            dy = rayon_km / 111.0
-            dx = rayon_km / (111.0 * math.cos(math.radians(lat_c)))
+            dy = cote_km / 111.0
+            dx = cote_km / (111.0 * math.cos(math.radians(lat_c)))
         n_rows = max(1, int(math.ceil(hauteur / dy)))
         n_cols = max(1, int(math.ceil(largeur / dx)))
-        mode_desc = f"~{rayon_km:.0f} km/morceau ({n_rows}×{n_cols})"
+        mode_desc = f"~{cote_km:.0f} km/morceau ({n_rows}×{n_cols})"
     elif n_morceaux > 1:
         best = (1, n_morceaux); best_ratio = float('inf')
         for r in range(1, int(math.sqrt(n_morceaux)) + 1):
@@ -11274,7 +11290,20 @@ def _telecharger_dalles_zone(dalles_dict, bbox, dossier_dalles, dossier_ville, a
     # réécrivait tout le JSON + fsync PAR dalle (O(n²) sur un chunk de
     # milliers de dalles, dizaines de secondes perdues par chunk).
     _cds = [chemin_dalle(dossier_dalles, _nom) for _nom in noms_persistance]
-    _creer_fichiers([c for c in _cds if c.exists()])
+    _reg = [c for c in _cds if c.exists()]
+    # Mode LAZ : le nuage .laz gardé en cache par post_fetch est l'intermédiaire
+    # le plus LOURD (~200 Mo/dalle) et ne vit PAS avec le .tif produit (production)
+    # → sans déclaration explicite --nettoyage ne le voit jamais et un balayage
+    # départemental sature le disque (le .tif, léger, était seul purgé). On l'ajoute
+    # au manifeste ; --cleanup-keep-tiles l'épargne (cf. cleanup du chunk, qui garde
+    # aussi le dossier cache des nuages). No-op pour un provider sans mode LAZ.
+    _cloud_path = getattr(PROVIDER, "cloud_path", None)
+    if _cloud_path is not None:
+        for c in _cds:
+            _lz = _cloud_path(c)
+            if _lz is not None and _lz.exists():
+                _reg.append(_lz)
+    _creer_fichiers(_reg)
 
 
 def _mbtiles_est_complete(mbt_path):
@@ -11841,9 +11870,17 @@ def _run_split_priori(args, sous_zones, mode_desc, nom_zone, racine_pr,
                     # --cleanup-keep-tiles : épargner le cache de dalles, qu'une
                     # tâche ultérieure de la même file va relire (cf. GUI, qui
                     # ne pose ce flag que sur les tâches non-finales d'un groupe
-                    # provider×surface×zone).
-                    _keep = (_dossier_dalles_actif(args)
-                             if getattr(args, "nettoyage_garder_dalles", False) else None)
+                    # provider×surface×zone). En mode LAZ, épargner AUSSI le cache
+                    # de nuages .laz (cloud_cache_dir) : la reconversion sans
+                    # re-download (pre_download) en dépend. Sans lui, le nuage
+                    # qu'on vient de déclarer au manifeste serait supprimé.
+                    if getattr(args, "nettoyage_garder_dalles", False):
+                        _keep = [_dossier_dalles_actif(args)]
+                        _cloud_cache = getattr(PROVIDER, "cloud_cache_dir", None)
+                        if _cloud_cache is not None:
+                            _keep.append(_cloud_cache)
+                    else:
+                        _keep = None
                     _supprimer_fichiers(manifeste.fichiers_morceau(cle), _keep)
         except ZoneHorsCouvertureWMTS:
             # Chunk auto-généré entièrement hors couverture (mer, hors frontière) :
@@ -12014,7 +12051,7 @@ def _traiter_bbox_wmts(args, bbox_wgs84, nom_z, nom_zone_base, layer, style, img
         args.zone_nom = _nom_orig
 
 
-def decouper_mbtiles(src_mbtiles, rayon_km=0.0, n_morceaux=1, n_cols=0, n_rows=0,
+def decouper_mbtiles(src_mbtiles, cote_km=0.0, n_morceaux=1, n_cols=0, n_rows=0,
                      dossier=None, ecraser=False):
     """
     Découpe un MBTiles source en sous-MBTiles.
@@ -12022,7 +12059,7 @@ def decouper_mbtiles(src_mbtiles, rayon_km=0.0, n_morceaux=1, n_cols=0, n_rows=0
     Modes (par ordre de priorité) :
       - n_cols > 0 et n_rows > 0 : grille explicite cols×rows (depuis la GUI).
       - n_morceaux > 1            : N morceaux, grille auto la plus carrée.
-      - rayon_km  > 0             : carrés de ~rayon_km km.
+      - cote_km  > 0              : carrés de ~cote_km km de côté.
       - sinon                     : retourne [src_mbtiles] sans découpe.
 
     Nommage des sorties : {stem}_{ligne:03d}x{col:03d}.mbtiles
@@ -12033,7 +12070,7 @@ def decouper_mbtiles(src_mbtiles, rayon_km=0.0, n_morceaux=1, n_cols=0, n_rows=0
     if n_cols > 0 and n_rows > 0:
         # Grille explicite — on force n_morceaux cohérent pour la suite
         n_morceaux = n_cols * n_rows
-    if n_morceaux <= 1 and rayon_km <= 0:
+    if n_morceaux <= 1 and cote_km <= 0:
         return [src_mbtiles]
 
     if not src_mbtiles.exists():
@@ -12091,7 +12128,7 @@ def decouper_mbtiles(src_mbtiles, rayon_km=0.0, n_morceaux=1, n_cols=0, n_rows=0
                 sous_zones.append((i_lat, i_lon, lon_w, lat_s, lon_e, lat_n))
     else:
         sous_zones, mode_desc = _calculer_sous_zones_priori(
-            lon0, lat0, lon1, lat1, n_morceaux, rayon_km, unite_m=False)
+            lon0, lat0, lon1, lat1, n_morceaux, cote_km, unite_m=False)
 
     if len(sous_zones) <= 1:
         print("  Splitting: zone too small -> single file")
@@ -12242,7 +12279,7 @@ def _convertir_un_mbtiles(sf, args, mbtiles_neuf=True):
 
 def _convertir_formats(mbt_out, args, decoupe_sortie=True, mbtiles_neuf=True):
     """
-    Applique le découpage (grille cols×rows ou rayon_decoupe) puis génère
+    Applique le découpage (grille cols×rows ou split_width) puis génère
     RMAP/SQLiteDB pour chaque fichier résultant.
     Supprime le MBTiles source uniquement s'il a été généré dans cette
     exécution (mbtiles_neuf=True) ET non demandé via --formats-fichier.
@@ -12251,7 +12288,7 @@ def _convertir_formats(mbt_out, args, decoupe_sortie=True, mbtiles_neuf=True):
     if not mbt_out:
         return
 
-    r_dec  = getattr(args, "rayon_decoupe", 0.0)
+    r_dec  = getattr(args, "split_width", 0.0)
     n_cols = getattr(args, "cols_decoupe",  0)
     n_rows = getattr(args, "rows_decoupe",  0)
 
@@ -12274,7 +12311,7 @@ def _convertir_formats(mbt_out, args, decoupe_sortie=True, mbtiles_neuf=True):
         for sf in sous_fichiers:
             _convertir_un_mbtiles(sf, args, mbtiles_neuf=True)
     elif r_dec > 0:
-        sous_fichiers = decouper_mbtiles(mbt_out, rayon_km=r_dec,
+        sous_fichiers = decouper_mbtiles(mbt_out, cote_km=r_dec,
                                          dossier=mbt_out.parent,
                                          ecraser=args.tuiles_ecraser)
         if mbt_out.exists() and sous_fichiers and sous_fichiers != [mbt_out]:
@@ -12288,14 +12325,16 @@ def _convertir_formats(mbt_out, args, decoupe_sortie=True, mbtiles_neuf=True):
         _convertir_un_mbtiles(mbt_out, args, mbtiles_neuf=mbtiles_neuf)
 
 
-def _ajouter_args_zone(parser, *, rayon_default, bbox_metavar, bbox_help=None,
+def _ajouter_args_zone(parser, *, width_default, bbox_metavar, bbox_help=None,
                         avec_dossier=False, avec_help_full=False):
-    """Ajoute les flags --zone-{ville,gps,bbox,departement,rayon,nom}
+    """Ajoute les flags --zone-{ville,gps,bbox,departement,width,nom}
     au parser fourni, en factorisant la duplication entre main(),
     main_wmts(), main_wfs(). Les divergences réelles sont :
 
-    - rayon_default : main() utilisait None (resolved to 10 plus tard),
-      main_wmts/wfs utilisent 10.0 dès le parser.
+    - width_default : LARGEUR (côté du carré) par défaut, en km. main()
+      utilise None (résolu à 20 plus tard), main_wmts/wfs utilisent 20.0 dès
+      le parser. NB : c'est un CÔTÉ, pas un rayon (20 km de large = l'ancien
+      rayon de 10 km, avant le passage au modèle largeur).
     - bbox_metavar  : main() = "X1,Y1,X2,Y2" Lambert 93 en mètres ;
       main_wmts/wfs = "W,S,E,N" WGS84 en degrés.
     - bbox_help     : help textuel propre à chaque mode.
@@ -12332,10 +12371,11 @@ def _ajouter_args_zone(parser, *, rayon_default, bbox_metavar, bbox_help=None,
         loc.add_argument("--zone-department", "--zone-departement", metavar="NUM", dest="zone_departement")
         loc.add_argument("--zone-region", metavar="SLUG")
 
-    parser.add_argument("--zone-radius", "--zone-rayon", type=float, default=rayon_default,
-                        metavar="KM", dest="zone_rayon",
-                        help=f"Radius in km around the point "
-                             f"(default: {rayon_default if rayon_default is not None else 10})")
+    parser.add_argument("--zone-width", "--zone-largeur", type=float, default=width_default,
+                        metavar="KM", dest="zone_width",
+                        help=f"Width in km of the (square) zone around the point "
+                             f"(the side, not a radius; default: "
+                             f"{width_default if width_default is not None else 20})")
     parser.add_argument("--zone-name", "--zone-nom", metavar="NAME", default=None, dest="zone_nom",
                         help="Output folder name for the processed zone. "
                              "Required for --zone-gps and --zone-bbox.")
@@ -12425,8 +12465,9 @@ def _resoudre_zone_wgs84(args):
         if not nom_zone:
             print("  ERROR: --zone-name required with --zone-gps")
             sys.exit(1)
-        r     = args.zone_rayon / 111.0
-        r_lon = args.zone_rayon / (111.0 * math.cos(math.radians(lat_c)))
+        _demi  = (args.zone_width or 20.0) / 2.0   # côté → demi-étendue
+        r     = _demi / 111.0
+        r_lon = _demi / (111.0 * math.cos(math.radians(lat_c)))
         lat_min, lat_max = lat_c - r,     lat_c + r
         lon_min, lon_max = lon_c - r_lon, lon_c + r_lon
 
@@ -12436,8 +12477,9 @@ def _resoudre_zone_wgs84(args):
         lat_c, lon_c = geocoder_ville_wgs84(args.zone_ville)
         if lat_c is None:
             sys.exit(1)
-        r     = args.zone_rayon / 111.0
-        r_lon = args.zone_rayon / (111.0 * math.cos(math.radians(lat_c)))
+        _demi  = (args.zone_width or 20.0) / 2.0   # côté → demi-étendue
+        r     = _demi / 111.0
+        r_lon = _demi / (111.0 * math.cos(math.radians(lat_c)))
         lat_min, lat_max = lat_c - r,     lat_c + r
         lon_min, lon_max = lon_c - r_lon, lon_c + r_lon
 
@@ -12456,7 +12498,7 @@ def main_decouper():
     """
     Mode --decouper : découpe a posteriori un MBTiles existant.
     Usage : lidar2map.py --decouper --source fichier.mbtiles
-            [--cols C --rows R | --rayon-decoupe KM]
+            [--cols C --rows R | --split-width KM]
             [--formats-fichier mbtiles rmap sqlitedb]
             [--tuiles-ecraser]
     """
@@ -12471,8 +12513,8 @@ def main_decouper():
                         help="Number of grid columns (East-West).")
     parser.add_argument("--rows", type=int, default=0, metavar="N",
                         help="Number of grid rows (North-South).")
-    parser.add_argument("--split-radius", "--rayon-decoupe", type=float, default=0.0, metavar="KM",
-                        dest="rayon_decoupe", help="Split into ~KM km squares.")
+    parser.add_argument("--split-width", "--split-largeur", type=float, default=0.0, metavar="KM",
+                        dest="split_width", help="Split into ~KM km squares (KM = the side).")
     # Mode raster uniquement : pas de map/geojson/transparent-raster (sorties
     # vecteur) — spécialisation intentionnelle, cf. le parser principal (l.~8699).
     parser.add_argument("--file-formats", "--formats-fichier", nargs="+", dest="formats_fichier",
@@ -12499,10 +12541,10 @@ def main_decouper():
     print(f"  Formats : {' '.join(_ff)}")
     if args.cols > 0 and args.rows > 0:
         print(f"  Grille  : {args.cols} cols × {args.rows} lignes")
-    elif args.rayon_decoupe:
-        print(f"  Radius  : {args.rayon_decoupe} km/chunk")
+    elif args.split_width:
+        print(f"  Side    : {args.split_width} km/chunk")
 
-    sorties = decouper_mbtiles(src, rayon_km=args.rayon_decoupe,
+    sorties = decouper_mbtiles(src, cote_km=args.split_width,
                                n_cols=args.cols, n_rows=args.rows,
                                ecraser=args.tuiles_ecraser)
     for sf in sorties:
@@ -12553,9 +12595,9 @@ Examples:
     grp_priori.add_argument("--split-rows", "--rows-decoupe", type=int, default=0, metavar="N",
                             dest="rows_decoupe",
                             help="Number of grid rows (North-South).")
-    grp_priori.add_argument("--split-radius", "--rayon-decoupe", type=float, default=0.0, metavar="KM",
-                            dest="rayon_decoupe",
-                            help="Alternative: split into ~KM km squares.")
+    grp_priori.add_argument("--split-width", "--split-largeur", type=float, default=0.0, metavar="KM",
+                            dest="split_width",
+                            help="Alternative: split into ~KM km squares (KM = the side).")
     grp_priori.add_argument("--cleanup", "--nettoyage", action="store_true", dest="nettoyage",
                             help="Delete intermediate tiles + TIFs after each chunk. "
                                  "Essential for large areas (a whole department).")
@@ -12569,7 +12611,7 @@ Examples:
     # Zone
     _ajouter_args_zone(
         parser,
-        rayon_default=10.0,
+        width_default=20.0,
         bbox_metavar="W,S,E,N",
         bbox_help="WGS84 bbox: lon_min,lat_min,lon_max,lat_max",
     )
@@ -12714,11 +12756,11 @@ Examples:
     # ── A-priori splitting: traitement séquentiel morceau par morceau ────────
     _cols_pr  = getattr(args, "cols_decoupe", 0) or 0
     _rows_pr  = getattr(args, "rows_decoupe", 0) or 0
-    _rayon_pr = getattr(args, "rayon_decoupe", 0.0) or 0.0
-    if (_cols_pr > 0 and _rows_pr > 0) or _rayon_pr > 0:
+    _cote_pr  = getattr(args, "split_width", 0.0) or 0.0
+    if (_cols_pr > 0 and _rows_pr > 0) or _cote_pr > 0:
         sous_zones, mode_desc = _calculer_sous_zones_priori(
             lon_min, lat_min, lon_max, lat_max,
-            0, _rayon_pr, unite_m=False, n_cols=_cols_pr, n_rows=_rows_pr)
+            0, _cote_pr, unite_m=False, n_cols=_cols_pr, n_rows=_rows_pr)
         if len(sous_zones) > 1:
             racine_pr = (Path(args.dossier).resolve() if args.dossier
                          else DOSSIER_TRAVAIL / "Projets" / nom_zone / "raster")
@@ -13419,7 +13461,7 @@ def rasteriser_geojson_transparent(geojson_path, sqlitedb_out, zoom_min, zoom_ma
         # petite zone (elles la frôlent). Message actionnable plutôt que cryptique.
         if bbox_wgs84:
             print("  transparent-raster: no feature within the zone "
-                  "(features exist nearby but none cross it - try a larger --zone-radius)")
+                  "(features exist nearby but none cross it - try a larger --zone-width)")
         else:
             print(f"  transparent-raster: no drawable feature in {geojson_path.name}")
         return None
@@ -14633,7 +14675,7 @@ def main_wfs():
             [f"  {k:<16} {v[2]}" for k, v in COUCHES_WFS.items()] +
             ["",
              "Examples:",
-             "  python lidar2map.py --vector --zone-city gareoult --zone-radius 5",
+             "  python lidar2map.py --vector --zone-city gareoult --zone-width 10",
              "  python lidar2map.py --vector --layer batiments routes --zone-city gareoult",
              "  python lidar2map.py --vector --layer cadastre --zone-department 83",
             ]
@@ -14650,7 +14692,7 @@ def main_wfs():
     # Zone — même logique que --ignraster
     _ajouter_args_zone(
         parser,
-        rayon_default=10.0,
+        width_default=20.0,
         bbox_metavar="W,S,E,N",
     )
     parser.add_argument("--output-dir", "--dossier",     metavar="PATH", default=None, dest="dossier",
@@ -15605,7 +15647,7 @@ def _cfg_depuis_argv() -> dict:
         "ville":   _arg("--zone-city", "--zone-ville"),
         "gps":     _arg("--zone-gps"),
         "bbox":    _arg("--zone-bbox"),
-        "rayon":   _arg_float("--zone-radius", "--zone-rayon", default=10.0),
+        "zone_width": _arg_float("--zone-width", "--zone-largeur", default=20.0),
         # LiDAR
         "tel":           _flag("--download", "--telechargement"),
         # Compression ON par defaut : seule la NEGATION apparait dans argv
@@ -15618,6 +15660,7 @@ def _cfg_depuis_argv() -> dict:
         # 4) et le champ OSM. Même conditionnement que osm_tags_sel /
         # wfs_couches_sel plus bas, qui l'avaient déjà.
         "workers_l":     _arg_int("--workers", default=8) if t == "lidar" else 8,
+        "laz_parallel":  _arg_int("--laz-parallel", default=1),
         "dossier_dalles":_arg("--tiles-dir", "--dossier-dalles"),
         "no_omb":        bool(ombs) or _flag("--shadings", "--ombrages", "--shading"),
         "ombrages":      ombs,
@@ -15640,7 +15683,7 @@ def _cfg_depuis_argv() -> dict:
         "ecraser_mbt":   _flag("--tiles-overwrite", "--tuiles-ecraser"),
         "cols_decoupe":  _arg_int("--split-cols", "--cols-decoupe", default=1),
         "rows_decoupe":  _arg_int("--split-rows", "--rows-decoupe", default=1),
-        "rayon_decoupe_l": _arg_float("--split-radius", "--rayon-decoupe", default=0.0),
+        "split_width_l": _arg_float("--split-width", "--split-largeur", default=0.0),
         "nettoyage":     _flag("--cleanup", "--nettoyage"),
         # IGN Raster
         "couche":        _arg("--layer", "--couche"),
@@ -16479,8 +16522,8 @@ def lancer_gui():
                     cmd += ["--zone-department", cfg["dep"]]
                 elif mode == "region" and cfg.get("region"):
                     cmd += ["--zone-region", cfg["region"]]
-                if cfg.get("rayon") is not None and cfg["rayon"] != "":
-                    cmd += ["--zone-radius", str(cfg["rayon"])]
+                if cfg.get("zone_width") is not None and cfg["zone_width"] != "":
+                    cmd += ["--zone-width", str(cfg["zone_width"])]
                 if cfg.get("nom"):
                     cmd += ["--zone-name", cfg["nom"]]
                 if cfg.get("dossier"):
@@ -16508,6 +16551,11 @@ def lancer_gui():
                     cmd += ["--tiles-dir", cfg["dossier_dalles"]]
                 if cfg.get("workers_l"):
                     cmd += ["--workers", str(cfg["workers_l"])]
+                # --laz-parallel : n'émettre que si explicitement > 1 (défaut 1 =
+                # sériel, sûr). Le champ GUI est borné (max 8) et n'apparaît qu'en
+                # mode LAZ ; le cœur affiche l'estimation RAM (~3 Go × N).
+                if cfg.get("laz_parallel", 1) and cfg["laz_parallel"] > 1:
+                    cmd += ["--laz-parallel", str(cfg["laz_parallel"])]
                 if cfg.get("no_omb"):
                     ombs = cfg.get("ombrages", [])
                     if ombs: cmd += ["--shadings"] + ombs
@@ -16554,8 +16602,8 @@ def lancer_gui():
                         cmd += ["--split-cols", str(_cols),
                                 "--split-rows", str(_rows)]
                     elif (cfg.get("decoupe", False)
-                          and cfg.get("rayon_decoupe_l", 0) > 0):
-                        cmd += ["--split-radius", str(cfg["rayon_decoupe_l"])]
+                          and cfg.get("split_width_l", 0) > 0):
+                        cmd += ["--split-width", str(cfg["split_width_l"])]
                     if cfg.get("nettoyage"):
                         cmd.append("--cleanup")
                         # Posé par la file d'attente (renderFile/lancerFile) quand
@@ -16600,8 +16648,8 @@ def lancer_gui():
                         cmd += ["--split-cols", str(_cols),
                                 "--split-rows", str(_rows)]
                     elif (cfg.get("decoupe_s", False)
-                          and cfg.get("rayon_decoupe_s", 0) > 0):
-                        cmd += ["--split-radius", str(cfg["rayon_decoupe_s"])]
+                          and cfg.get("split_width_s", 0) > 0):
+                        cmd += ["--split-width", str(cfg["split_width_s"])]
                     if cfg.get("nettoyage"): cmd.append("--cleanup")
                     if cfg.get("min_free_gb", 0) > 0:
                         cmd += ["--min-free-gb", str(cfg["min_free_gb"])]
@@ -16678,8 +16726,8 @@ def lancer_gui():
                 if cfg.get("cols_decoupe_d", 0) > 0 and cfg.get("rows_decoupe_d", 0) > 0:
                     cmd += ["--cols", str(cfg["cols_decoupe_d"]),
                             "--rows", str(cfg["rows_decoupe_d"])]
-                elif cfg.get("rayon_decoupe_d", 0) > 0:
-                    cmd += ["--split-radius", str(cfg["rayon_decoupe_d"])]
+                elif cfg.get("split_width_d", 0) > 0:
+                    cmd += ["--split-width", str(cfg["split_width_d"])]
                 fmts_d = []
                 if cfg.get("mbtiles_d"):  fmts_d.append("mbtiles")
                 if cfg.get("rmap_d"):     fmts_d.append("rmap")

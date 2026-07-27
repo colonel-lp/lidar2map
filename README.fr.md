@@ -286,9 +286,9 @@ Tout ce qui suit vaut pour le binaire comme pour le script, remplacez simplement
 
 > Les options ci-dessous sont en anglais. Les anciens noms français restent acceptés comme alias, les anciennes commandes continuent donc de fonctionner.
 
-**Ombrage SVF + carte topo IGN sur une commune (zone 1 km² autour de Garéoult, France) :**
+**Ombrage SVF + carte topo IGN sur une commune (zone 2 km autour de Garéoult, France) :**
 ```bash
-python lidar2map.py --lidar --zone-city Gareoult --zone-radius 1 \
+python lidar2map.py --lidar --zone-city Gareoult --zone-width 2 \
     --shadings multi svf --file-formats mbtiles```
 
 **Ombrages sur Amsterdam (Pays-Bas, AHN4) :**
@@ -300,13 +300,13 @@ python lidar2map.py --provider nl-ahn --lidar --download \
 **Ombrages sur Genève (Suisse, swissALTI3D) :**
 ```bash
 python lidar2map.py --provider ch-swisstopo --lidar --download \
-    --zone-city Geneve --zone-radius 1 \
+    --zone-city Geneve --zone-width 2 \
     --shadings svf --file-formats mbtiles```
 
 **Ombrages sur Oslo (Norvège, Kartverket) :**
 ```bash
 python lidar2map.py --provider no-kartverket --lidar --download \
-    --zone-city Oslo --zone-radius 1 \
+    --zone-city Oslo --zone-width 2 \
     --shadings multi --file-formats mbtiles```
 
 **Orthophoto historique 1950-1965 sur une zone de chasse archéo :**
@@ -402,7 +402,7 @@ Pour ajouter un pays (ex. Pologne, Slovénie, Slovaquie, Italie PNRR) : copier l
 - **Streaming mémoire** : traitement département-scale sans saturer la RAM (ijson, rasterio windowed reads, génération MBTiles tuile par tuile).
 - **Cancellation propre** : `Ctrl+C` une fois → arrêt après le morceau en cours. `Ctrl+C` deux fois → arrêt immédiat.
 - **Reprise après interruption** : la même commande reprend où elle s'est arrêtée, via un manifeste `.json` qui suit les morceaux terminés.
-- **Découpage à priori** : pour les grandes zones, découper en grille N×N **ou en carrés de ~K km** (`--split-radius`, taille de chunk bornée, recommandé à l'échelle nationale), utile pour ne pas avoir à régénérer la zone entière en cas de plantage. Nettoyage disque par morceau (`--cleanup`) et garde-fou d'espace libre (`--min-free-gb`) pour les très grandes couvertures.
+- **Découpage à priori** : pour les grandes zones, découper en grille N×N **ou en carrés de ~K km** (`--split-width`, taille de chunk bornée, recommandé à l'échelle nationale), utile pour ne pas avoir à régénérer la zone entière en cas de plantage. Nettoyage disque par morceau (`--cleanup`) et garde-fou d'espace libre (`--min-free-gb`) pour les très grandes couvertures.
 - **Historique crash-safe** : chaque exécution est enregistrée *au démarrage* (statut "en cours") puis finalisée en "ok" ou "ko". Un crash dur (kill -9, panne) laisse l'entrée visible dans l'UI, la trace est conservée pour debug.
 - **Multi-provider LiDAR** : abstraction `providers/<code>.py` permettant de plugger n'importe quelle source LiDAR. Providers fournis : **FR** (IGN), **NL** (AHN), **CH** (swisstopo), **NO** (Kartverket), **DE** (Bavière, NRW, Basse-Saxe), **AT** (Tyrol, Osttirol), **GB** (Angleterre, Pays de Galles), **US** (3DEP 1 m, sans compte), couvrant des paradigmes d'API variés (TMS PBF, JSON FeatureCollection, STAC, ArcGIS ImageServer, Metalink/`index.json`, **WCS `GetCoverage` par dalle**). Ajout d'un pays = ~100-150 lignes dans un nouveau fichier provider (voir *Couverture & sources évaluées* plus bas).
 - **GUI interactive** : 6 onglets (LiDAR, IGN raster, IGN vecteur, OSM, Fusion, Découpage), sélecteur de provider en haut du formulaire (onglets IGN Raster/Vecteur masqués automatiquement pour les providers non-FR), historique des 50 dernières commandes avec badges de statut, validation des paramètres, log live, modal d'erreur, et une file d'attente (`＋ File`) pour enchaîner plusieurs zones.
@@ -490,7 +490,7 @@ Le SVF d'en-tête et du triptyque ci-dessus (secteur de Rougiers, 83) a été ca
 
 ```bash
 python lidar2map.py \
-  --zone-gps <lat> <lon> --zone-radius 1 --zone-name hero \
+  --zone-gps <lat> <lon> --zone-width 2 --zone-name hero \
   --lidar --download --workers 8 \
   --shadings svf --shading-elevation 25 \
   --svf-conv rvt --svf-dist 20 --svf-gamma 0.8 --svf-sweep \
