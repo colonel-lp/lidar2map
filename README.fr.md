@@ -334,6 +334,39 @@ python lidar2map.py --vector --zone-department 83 \
     --layer routes batiments --file-formats gz map```
 Le format `map` convertit le GeoJSON IGN en carte Mapsforge `.map` (lisible par Locus Map ; OsmAnd utilise son propre format vectoriel OBF et ne lit pas le Mapsforge, mais sa carte offline intégrée fournit déjà la couche vectorielle : sur OsmAnd, il suffit de poser le raster LiDAR par-dessus en overlay).
 
+### Faire tourner en headless sur un serveur
+
+Un run à l'échelle d'un département prend des heures : on le lance donc en général sur un serveur Linux distant (une petite VM cloud suffit). Deux points comptent là-bas : le job doit survivre à ta session SSH, et le disque ne doit pas saturer.
+
+**Pas besoin de bureau.** Avec des arguments, l'outil tourne en pur ligne de commande : aucune fenêtre, aucun serveur X, et aucune des libs système Qt/xcb dont seule la GUI a besoin. Un Ubuntu Server nu suffit, et l'auto-bootstrap (`~/.lidar2map/venv`) se comporte pareil en headless.
+
+**Survivre à la déconnexion SSH avec `tmux`.** Lancé directement en SSH, le job meurt dès que ta connexion tombe (laptop en veille, PC éteint). `tmux` le garde vivant sur le serveur et te laisse te rattacher plus tard, barre de progression comprise :
+
+```bash
+sudo apt install -y tmux
+tmux new -s lidar                       # crée et entre dans la session
+python3 lidar2map.py --lidar --laz --zone-department 83 --download \
+  --split-width 5 --cleanup --min-free-gb 20 \
+  --shading lrm:sigma=4 --file-formats mbtiles
+# détacher : Ctrl-b puis d. Ferme le SSH, éteins ton PC.
+# plus tard, de n'importe où : reconnecte-toi en SSH, puis
+tmux attach -t lidar                    # la barre de progression en direct
+```
+
+Sans besoin de la vue live : `nohup python3 lidar2map.py … > run.log 2>&1 &` (suivi avec `tail -f run.log`), ou `systemd-run --user --unit=lidar83 python3 lidar2map.py …` pour un job totalement non surveillé qui survit à un redémarrage.
+
+**Garder le disque sous contrôle.** Les nuages LiDAR sont lourds (une dalle IGN HD pèse ~200 Mo). Sur une grande zone, découpe en morceaux et nettoie chacun à la fin : `--split-width 5 --cleanup` libère les intermédiaires d'un morceau (tuiles, `.laz` caché, TIF d'ombrage) avant que le suivant démarre, et `--min-free-gb 20` s'arrête proprement si l'espace libre passe sous le seuil (code de sortie 3, relançable) au lieu de planter sur un disque plein.
+
+**La reprise est gratuite.** En mode découpé, l'outil écrit un manifeste et saute les morceaux déjà terminés : une déconnexion, un crash ou un arrêt disque-bas est récupérable, relance la même commande et il repart où il s'était arrêté.
+
+**Lanceur en une commande depuis ton PC.** [`tools/run_on_vm.sh`](tools/run_on_vm.sh) fait tout ça en SSH : il installe lidar2map sur la VM si besoin (depuis les sources, l'auto-bootstrap gère les deps), puis lance ton run dans une session `tmux` détachée.
+
+```bash
+bash tools/run_on_vm.sh user@host "--lidar --laz --zone-department 83 --download --split-width 5 --cleanup --min-free-gb 20 --shading lrm:sigma=4 --file-formats mbtiles"
+```
+
+Idempotent : il clone ou fait un `git pull`, saute l'install si déjà présent, et ne lance pas un second run si un tourne déjà. Auth SSH par clé supposée (le défaut Hetzner).
+
 ## Providers LiDAR, ajouter un pays
 
 L'abstraction provider permet d'ajouter une source LiDAR nationale sans toucher au cœur du pipeline. Chaque provider vit dans `providers/<code>.py` (~50-200 lignes) et expose :

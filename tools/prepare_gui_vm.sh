@@ -1,15 +1,22 @@
 #!/bin/bash
 #
-# setup-hetzner-lidar2map.sh
-# À exécuter en root, juste après la création d'une VM Hetzner Ubuntu 24.04 fraîche.
-# Usage : sudo bash setup-hetzner-lidar2map.sh
+# prepare_gui_vm.sh
+# Prépare une VM avec le BUREAU (GUI lidar2map accessible en RDP), sur une
+# Hetzner Ubuntu 24.04 fraîche. À exécuter en root juste après création de la VM :
+#   sudo bash prepare_gui_vm.sh
 #
-# Ce script :
+# GUI vs CLI, les deux options :
+#  - GUI  (ce script)        : bureau distant RDP, on lance lidar2map à la souris.
+#  - CLI  (tools/run_on_vm.sh) : calcul HEADLESS sans bureau, installé + lancé
+#                               depuis ton PC via SSH/tmux. Pour un serveur de
+#                               calcul, prends celui-là, pas ce script.
+#
+# Ce script (option GUI) :
 #  - met à jour le système
 #  - crée un utilisateur non-root avec sudo + accès SSH par clé
-#  - installe LXQt + xrdp + Openbox (bureau distant)
-#  - installe les libs Qt/XCB nécessaires à lidar2map
-#  - télécharge, vérifie et installe la dernière release lidar2map
+#  - installe LXQt + xrdp + Openbox (bureau distant RDP)
+#  - installe les libs Qt/XCB nécessaires à la GUI lidar2map
+#  - télécharge, vérifie et installe la dernière release lidar2map (binaire)
 #  - crée un raccourci sur le bureau
 #
 # Adapte les variables ci-dessous si besoin avant de lancer.
