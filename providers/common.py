@@ -1396,26 +1396,53 @@ class LazProvider:
 
     # ── découverte / conversion / hooks ──────────────────────────────────────
     def _check_deps(self):
-        """Deps vérifiées AVANT le download lourd (revue LAZ 2026-07-18) : sans
-        ça on tirait ~200 Mo de nuage puis on échouait à la conversion faute de
-        laspy / CSF."""
-        try:
-            import laspy  # noqa: F401
-        except ImportError:
+        """Deps du mode LAZ, vérifiées AVANT le download lourd (revue LAZ
+        2026-07-18) et installées À LA DEMANDE si absentes. Le bootstrap standard
+        n'installe pas laspy/lazrs/CSF (deps optionnelles : tout le monde ne fait
+        pas de LAZ) → on les tire ici, au moment où le mode LAZ sert vraiment,
+        comme le bootstrap fait pour les deps critiques. Le binaire PyInstaller
+        les embarque déjà : l'import passe, aucun install déclenché."""
+        import importlib
+
+        def _ensure(module, pip_pkgs):
+            """Importe `module` ; si absent, pip install `pip_pkgs` dans l'env
+            courant (le venv) puis réessaie. True si finalement importable."""
+            try:
+                importlib.import_module(module)
+                return True
+            except ImportError:
+                pass
+            import subprocess
+            import sys
+            print(f"  LAZ: installation de {' '.join(pip_pkgs)} (une fois)...",
+                  flush=True)
+            try:
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pip_pkgs],
+                               check=True)
+                importlib.invalidate_caches()
+                importlib.import_module(module)
+                return True
+            except Exception as _e:
+                print(f"  LAZ: échec de l'install auto ({type(_e).__name__}: {_e})",
+                      flush=True)
+                return False
+
+        if not _ensure("laspy", ["laspy", "lazrs"]):
             raise RuntimeError("le mode LAZ requiert laspy (pip install laspy lazrs)")
+        import laspy
         # laspy s'IMPORTE sans backend de décompression LAZ : sans ce probe, on
         # tirait ~80-200 Mo de nuage COMPRESSÉ puis la LECTURE échouait faute de
         # lazrs (revue 2026-07-22). detect_available() = () si aucun backend.
         try:
             if not laspy.LazBackend.detect_available():
-                raise RuntimeError("le mode LAZ requiert un backend de décompression "
-                                   "LAZ : pip install lazrs")
+                _ensure("lazrs", ["lazrs"])
+                if not laspy.LazBackend.detect_available():
+                    raise RuntimeError("le mode LAZ requiert un backend de décompression "
+                                       "LAZ : pip install lazrs")
         except AttributeError:
             pass   # laspy trop ancien pour LazBackend : ne pas bloquer
         if self.ground == "csf":
-            try:
-                import CSF  # noqa: F401
-            except ImportError:
+            if not _ensure("CSF", ["cloth-simulation-filter"]):
                 raise RuntimeError("--laz-ground csf requiert 'cloth-simulation-filter' "
                                    "(pip install cloth-simulation-filter)")
 
