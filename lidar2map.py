@@ -4653,6 +4653,40 @@ def _percentiles_grille(src_path, halo, calc_block, p_lo, p_hi):
 _NUMBA_KERNELS_CACHE = {}
 
 
+def _ensure_numba():
+    """Garantit que numba est importable, en l'installant à la demande si absent.
+
+    numba accélère hillshade/slope/SVF/openness de ×15 à ×50 (JIT LLVM). Il est
+    normalement posé par le bootstrap venv, mais un venv ancien ou un install
+    optionnel qui a échoué peut le laisser manquant. On l'installe alors ici, au
+    moment où un ombrage numba est réellement demandé (même logique que
+    laspy/lazrs pour le LAZ dans providers.common._check_deps).
+
+    PAS de repli numpy silencieux : si l'install échoue, on lève une erreur
+    claire plutôt que de dégrader d'un facteur 15-50 sans le dire. Le binaire
+    PyInstaller embarque déjà numba, donc ce chemin ne concerne que la source.
+    """
+    import importlib
+    try:
+        return importlib.import_module("numba")
+    except ImportError:
+        pass
+    import subprocess
+    print("  numba: installing (one-time, speeds up SVF/hillshade x15-50)...",
+          flush=True)
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "numba"],
+                       check=True)
+        importlib.invalidate_caches()
+        return importlib.import_module("numba")
+    except Exception as _e:
+        raise RuntimeError(
+            "numba is required for this shading (hillshade/slope/SVF/openness) "
+            "and its automatic install failed. Install it manually: "
+            "pip install numba"
+        ) from _e
+
+
 def _get_numba_horn_kernels():
     """Compile et cache les kernels Numba pour Horn (hillshade, multi, slope).
 
@@ -4665,6 +4699,7 @@ def _get_numba_horn_kernels():
     """
     if "horn" in _NUMBA_KERNELS_CACHE:
         return _NUMBA_KERNELS_CACHE["horn"]
+    _ensure_numba()  # installe numba à la demande ou lève (pas de repli silencieux)
     try:
         import numba as _nb
         import numpy as _np
@@ -4849,9 +4884,6 @@ def _get_numba_horn_kernels():
         kernels = (_hillshade_kernel, _multi_kernel, _slope_kernel)
         _NUMBA_KERNELS_CACHE["horn"] = kernels
         return kernels
-    except ImportError:
-        _NUMBA_KERNELS_CACHE["horn"] = None
-        return None
     except Exception as _e:
         print(f"  Numba kernels Horn : erreur compilation ({_e}) — fallback numpy", flush=True)
         _NUMBA_KERNELS_CACHE["horn"] = None
@@ -4865,6 +4897,7 @@ def _get_numba_svf_kernel():
     """
     if "svf" in _NUMBA_KERNELS_CACHE:
         return _NUMBA_KERNELS_CACHE["svf"]
+    _ensure_numba()  # installe numba à la demande ou lève (pas de repli silencieux)
     try:
         import numba as _nb
         import numpy as _np
@@ -4943,9 +4976,6 @@ def _get_numba_svf_kernel():
 
         _NUMBA_KERNELS_CACHE["svf"] = _svf_kernel
         return _svf_kernel
-    except ImportError:
-        _NUMBA_KERNELS_CACHE["svf"] = None
-        return None
     except Exception as _e:
         print(f"  Numba kernel SVF : erreur compilation ({_e}) — fallback numpy", flush=True)
         _NUMBA_KERNELS_CACHE["svf"] = None
@@ -4960,6 +4990,7 @@ def _get_numba_svf_opos_kernel():
     sorties numériquement identiques (min_tan, utile au seul oneg, est omis)."""
     if "svf_opos" in _NUMBA_KERNELS_CACHE:
         return _NUMBA_KERNELS_CACHE["svf_opos"]
+    _ensure_numba()  # installe numba à la demande ou lève (pas de repli silencieux)
     try:
         import numba as _nb
         import numpy as _np
@@ -5019,9 +5050,6 @@ def _get_numba_svf_opos_kernel():
 
         _NUMBA_KERNELS_CACHE["svf_opos"] = _svf_opos_kernel
         return _svf_opos_kernel
-    except ImportError:
-        _NUMBA_KERNELS_CACHE["svf_opos"] = None
-        return None
     except Exception as _e:
         print(f"  Numba kernel SVF+opos : erreur compilation ({_e})", flush=True)
         _NUMBA_KERNELS_CACHE["svf_opos"] = None
@@ -5064,6 +5092,7 @@ def _get_numba_svf_sweep_kernel():
     """
     if "svf_sweep" in _NUMBA_KERNELS_CACHE:
         return _NUMBA_KERNELS_CACHE["svf_sweep"]
+    _ensure_numba()  # installe numba à la demande ou lève (pas de repli silencieux)
     try:
         import numba as _nb
         import numpy as _np
@@ -5265,9 +5294,6 @@ def _get_numba_svf_sweep_kernel():
 
         _NUMBA_KERNELS_CACHE["svf_sweep"] = _svf_sweep_kernel
         return _svf_sweep_kernel
-    except ImportError:
-        _NUMBA_KERNELS_CACHE["svf_sweep"] = None
-        return None
     except Exception as _e:
         print(f"  Numba kernel SVF sweep : erreur compilation ({_e})", flush=True)
         _NUMBA_KERNELS_CACHE["svf_sweep"] = None
