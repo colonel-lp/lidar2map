@@ -44,10 +44,12 @@ ssh -o ConnectTimeout=10 "$VM" \
 set -euo pipefail
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 
-# 1. Paquets de base (idempotent : rien si deja la)
+# 1. Paquets de base. NB : Ubuntu fournit python3 SANS le module venv/ensurepip
+#    (paquet separe python3-venv). On teste 'import ensurepip', pas juste le
+#    binaire python3, sinon le venv du bootstrap echoue (ensurepip not available).
 if ! command -v git  >/dev/null 2>&1 \
    || ! command -v tmux >/dev/null 2>&1 \
-   || ! command -v python3 >/dev/null 2>&1; then
+   || ! python3 -c "import ensurepip" >/dev/null 2>&1; then
   echo "==> Installation des paquets de base (git tmux python3-venv)..."
   $SUDO apt-get update -qq
   $SUDO apt-get install -y -qq git tmux python3 python3-venv
@@ -66,6 +68,13 @@ cd "$HOME/$DIR"
 
 # 3. Verif install : le 1er run bootstrappe le venv (~400 Mo, UNE fois) ; sinon rapide.
 #    Fait en synchrone pour voir les erreurs d'install ici (pas cachees dans un log).
+# Un run precedent sans python3-venv a pu laisser un venv a moitie cree (sans pip) :
+# on le supprime pour que le bootstrap le recree proprement, sinon il bute dessus.
+_venv="$HOME/.lidar2map/venv"
+if [ -d "$_venv" ] && ! "$_venv/bin/python3" -m pip --version >/dev/null 2>&1; then
+  echo "==> venv incomplet detecte (pip absent), suppression pour recreation..."
+  rm -rf "$_venv"
+fi
 echo "==> Verification de l'installation (bootstrap venv si besoin)..."
 python3 lidar2map.py --version
 
