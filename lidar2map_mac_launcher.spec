@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Spec PyInstaller pour le LAUNCHER lidar2map — macOS ARM64 (.app bundle).
+Spec PyInstaller pour le LAUNCHER lidar2map — macOS x86_64 (.app bundle).
 
 Construit la même source lidar2map.py en mode onefile minimal, en excluant
 toutes les deps lourdes (le launcher n'utilise que stdlib).
