@@ -7529,8 +7529,21 @@ def generer_ombrages(cogs, dossier_ville, choix=None, elevation_soleil=None, nom
     # Fichiers cibles de CE run (instances + pré-calculés provider) : permet à
     # l'étape MBTiles de ne tuiler QUE les ombrages demandés au lieu de tout le
     # dossier projet (sinon --tiles-overwrite re-tuile aussi les anciens).
-    return ([dossier_ville / f"{nom_base}_{sfx}.tif" for _t, _p, sfx in insts]
-            + [dossier_ville / f"{nom_base}_{c}_ombrage.tif" for c in _cles_provider])
+    #
+    # R2#23 : NE PAS rendre des chemins THÉORIQUES. Un ombrage qui a planté est
+    # supprimé (except avalé plus haut, cf. 7126/7256) ; renvoyer son chemin quand
+    # même faisait tuiler un fichier INEXISTANT → « Done » + historique ok SANS
+    # résultat. On LÈVE si un ombrage DEMANDÉ manque (fail-fast, aligné sur
+    # l'invariant « couverture trouée » : erreur>0 et discover-None lèvent déjà).
+    # Le chunk n'est alors pas marqué fait, un re-run le rejoue. « already present »
+    # (7094) laisse le fichier en place → il EXISTE → pas de faux positif.
+    _cibles = [dossier_ville / f"{nom_base}_{sfx}.tif" for _t, _p, sfx in insts]
+    _manquants = [p.name for p in _cibles if not p.exists()]
+    if _manquants:
+        raise RuntimeError("shading(s) failed and were removed: "
+                           + ", ".join(_manquants) + " - rerun to complete")
+    _prov = [dossier_ville / f"{nom_base}_{c}_ombrage.tif" for c in _cles_provider]
+    return _cibles + [p for p in _prov if p.exists()]
 
 
 def _bbox_depuis_gdalinfo(chemin):
