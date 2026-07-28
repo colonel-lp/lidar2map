@@ -1293,7 +1293,8 @@ def _bootstrap_venv_si_besoin():
          deps_optionnelles = [
           "osmium",
           "numba",
-       ] + _gui_opt    deps_pip = deps_critiques + deps_optionnelles
+       ] + _gui_opt
+       deps_pip = deps_critiques + deps_optionnelles
         print("  Installing dependencies in the venv (3-5 min)...")
 
       def _pip_install(pkgs):
