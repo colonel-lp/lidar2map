@@ -582,7 +582,28 @@ except ImportError:
     # des certificats système périmés (Windows 11, macOS). Dès que certifi
     # est installé (relance auto du bootstrap ou lancement suivant), la
     # branche ci-dessus rétablit la vérification stricte.
+    _SSL_CTX_CERTIFI = None
     ssl._create_default_https_context = ssl._create_unverified_context
+
+
+def _restaurer_tls_strict():
+    """Rétablit la vérification TLS stricte si certifi est désormais importable.
+
+    Au tout premier lancement (certifi absent), le bloc d'import ci-dessus a posé
+    un contexte NON vérifiant, filet transitoire pour que pip passe. En mode auto
+    un re-exec du venv ré-importe certifi (vérification stricte d'emblée), mais en
+    mode pip il n'y a PAS de re-exec : sans ce rappel, tout le trafic HTTPS du run
+    (JRE, osmosis, tuiles) resterait non vérifié APRÈS l'install de certifi (R2#2).
+    Idempotent : no-op si le contexte est déjà strict."""
+    global _SSL_CTX_CERTIFI
+    try:
+        import certifi as _cf
+    except ImportError:
+        return
+    os.environ['SSL_CERT_FILE']      = _cf.where()
+    os.environ['REQUESTS_CA_BUNDLE'] = _cf.where()
+    _SSL_CTX_CERTIFI = ssl.create_default_context(cafile=_cf.where())
+    ssl._create_default_https_context = lambda: _SSL_CTX_CERTIFI
 
 
 # Forcer stdout/stderr en UTF-8 dès le démarrage. Sur Windows la code page
@@ -1625,6 +1646,9 @@ def _bootstrap_environnement():
         _bootstrap_pip()
     if mode != "none":
         _installer_deps()
+        # certifi vient (peut-être) d'être installé : rétablir la vérification
+        # TLS stricte pour le reste du run (surtout mode pip, sans re-exec) (R2#2).
+        _restaurer_tls_strict()
 
 
 # Petit wrapper pour conserver _bootstrap_venv_si_besoin sans paramètre côté
@@ -3564,6 +3588,23 @@ def _rglob_tif_robuste(dossier):
     return resultats
 
 
+def _nom_dalle_sur(nom):
+    """True si `nom` est un BASENAME sûr (pas de traversée de chemin).
+
+    Les noms de dalles proviennent d'un index DISTANT du fournisseur (WFS/JSON/
+    ATOM). Un nom piégé (`../…`, séparateur, chemin absolu ou lettre de lecteur)
+    servirait à écrire HORS du cache via `dossier / nom` (traversée, R2#3). On
+    exige un composant de chemin unique, non `.`/`..`, sans NUL."""
+    if not nom or nom in (".", ".."):
+        return False
+    s = str(nom)
+    if "\x00" in s or "/" in s or "\\" in s:
+        return False
+    if os.path.isabs(s) or os.path.splitdrive(s)[0]:
+        return False
+    return os.path.basename(s) == s
+
+
 def chemin_dalle(dossier_dalles, nom):
     """
     Retourne le Path complet d'une dalle dans la structure sous-dossiers.
@@ -3573,6 +3614,12 @@ def chemin_dalle(dossier_dalles, nom):
     Fallback transparent : si la dalle existe à la racine (ancienne structure),
     retourne le chemin racine. Sinon retourne le chemin sous-dossier.
     """
+    # Invariant de sécurité : jamais construire un chemin à partir d'un nom qui
+    # échapperait le dossier (traversée, R2#3). Lève plutôt que de retourner un
+    # chemin hors cache ; les boucles de consommation pré-filtrent pour dégrader
+    # proprement (cf. _telecharger_dalles_zone / _lister_dalles_zone).
+    if not _nom_dalle_sur(nom):
+        raise ValueError(f"unsafe tile name (path traversal): {nom!r}")
     # Chemin racine (ancienne structure)
     chemin_racine = dossier_dalles / nom
     if chemin_racine.exists():
@@ -9579,6 +9626,30 @@ def _nettoyer_osmosis_temp_orphelins(verbose=False, min_age_s=300):
     return nb, bytes_freed
 
 
+# Grammaire d'un filtre osmosis `accept-ways` : `clé` ou `clé=valeur[,valeur…]`.
+# Les clés/valeurs OSM légitimes n'utilisent QUE lettres (unicode, accents ok),
+# chiffres, `_ : - . *` (wildcard) et l'espace. Aucun métacaractère shell n'y a
+# sa place. Sur Windows l'osmosis est un .bat lancé via cmd.exe (shell=True) : une
+# valeur `--layer` contenant `& | > ^ " %`… serait interprétée par le shell
+# (injection de commande, R2#1). On valide en amont par ALLOWLIST (rejet strict)
+# plutôt que d'échapper au cas par cas : plus sûr et indépendant de la plateforme.
+_OSM_TAG_RE = re.compile(r"^[\w:][\w:.\-*/+ ]*(=[\w:.\-*/+, ]*)?$", re.UNICODE)
+
+
+def _valider_osm_tags(osm_tags):
+    """Rejette tout token `--layer` hors grammaire osmosis (anti-injection, R2#1).
+
+    Lève SystemExit(1) au premier token invalide, avec un message clair pointant
+    le token fautif. Retourne la liste inchangée si tout est valide."""
+    for _t in osm_tags:
+        if not _OSM_TAG_RE.match(str(_t)):
+            print(f"  ERROR: invalid --layer filter {str(_t)!r} : only "
+                  f"osmosis tag filters are allowed (key or key=value[,value]), "
+                  f"no shell metacharacters.")
+            sys.exit(1)
+    return osm_tags
+
+
 def generer_carte_osm(bbox_wgs84, dossier_ville, nom_zone, osm_pbf,
                       osm_tags=None, export_geojson=True, ecraser_tuiles=False,
                       skip_bbox=False, geojson_formats=None):
@@ -9676,6 +9747,7 @@ def generer_carte_osm(bbox_wgs84, dossier_ville, nom_zone, osm_pbf,
                     "natural=water", "natural=coastline",
                     "waterway=river", "waterway=stream", "waterway=canal"]
     osm_tags = list(dict.fromkeys(osm_tags))
+    _valider_osm_tags(osm_tags)   # anti-injection avant l'osmosis shell (R2#1)
     print(f"  Tags : {' '.join(osm_tags)}", flush=True)
 
     chemin_pbf_filtre = dossier_ville / f"{nom_zone}_filtered.pbf"
@@ -11259,11 +11331,13 @@ def _lister_dalles_zone(noms_attendus, dossier_dalles, dossier_ville, bbox):
     # l'ancien scan était en O(chunks × fichiers) ; désormais O(noms de la zone).
     dalles_ombrages = []
     for nom in noms_zone:
-        p = chemin_dalle(dossier_dalles, nom)
+        # chemin_dalle lève ValueError sur un nom piégé (dalles_zone.txt altéré) :
+        # on saute au lieu de crasher (R2#3, défense en profondeur).
         try:
+            p = chemin_dalle(dossier_dalles, nom)
             if p.exists() and p.stat().st_size > SEUIL_DALLE_VALIDE:
                 dalles_ombrages.append(p)
-        except OSError:
+        except (OSError, ValueError):
             continue
     return sorted(dalles_ombrages)
 
@@ -11300,6 +11374,16 @@ def _telecharger_dalles_zone(dalles_dict, bbox, dossier_dalles, dossier_ville, a
     """
     ok = skip = absent = erreur = 0
     a_telecharger = []
+
+    # Sécurité : `dalles_dict` vient de PROVIDER.discover_dalles (index DISTANT).
+    # On écarte tout nom qui n'est pas un basename sûr AVANT de construire un
+    # chemin local, sinon une entrée piégée (`../…`) écrirait hors cache (R2#3).
+    _dict_sur = {n: u for n, u in dalles_dict.items() if _nom_dalle_sur(n)}
+    if len(_dict_sur) < len(dalles_dict):
+        _n_drop = len(dalles_dict) - len(_dict_sur)
+        print(f"  WARNING: {_n_drop} tile(s) with unsafe name(s) skipped "
+              f"(path traversal guard)")
+    dalles_dict = _dict_sur
 
     # Overwrite = VRAI re-download de la source (choix Nico : --download-overwrite
     # doit re-tirer, LAZ inclus). Les deux flags convergent (--download-force et

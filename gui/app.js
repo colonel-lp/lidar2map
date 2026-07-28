@@ -1611,7 +1611,7 @@ function partagerTelephone() {
     document.getElementById('share-url').textContent = r.url;
     renderQR(r.url, document.getElementById('share-qr'));
     document.getElementById('share-files').innerHTML =
-      (r.fichiers || []).map(f => '• ' + f).join('<br>');
+      (r.fichiers || []).map(f => '• ' + _acEsc(f)).join('<br>');   // R2#4 : nom échappé (XSS)
     document.getElementById('share-modal').style.display = 'flex';
   }).catch(e => alert(String(e)));
 }
@@ -2338,8 +2338,8 @@ function fusionVider() { fusionFiles = []; fusionSel = -1; renderFusionList(); }
 function renderFusionList() {
   const c = document.getElementById('fusion-list');
   c.innerHTML = fusionFiles.map((f,i) =>
-    `<div class="${i===fusionSel?'sel':''}" onclick="fusionSelect(${i})">${f.split(/[\\/]/).pop()}</div>`
-  ).join('');
+    `<div class="${i===fusionSel?'sel':''}" onclick="fusionSelect(${i})">${_acEsc(f.split(/[\\/]/).pop())}</div>`
+  ).join('');   // R2#4 : nom de fichier échappé (XSS)
 }
 function fusionSelect(i) { fusionSel = i; renderFusionList(); }
 

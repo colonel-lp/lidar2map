@@ -518,6 +518,44 @@ _l, _b, _r, _t = jp._tile_bounds(15, 29105, 12902)
 check("tile_bounds : ~1223 m de côté", abs((_r - _l) - jp._STEP) < 1 and _t > _b)
 check("discover(bbox_natif=None) → {}", jp.discover_dalles(None, None, None) == {})
 
+print("== 17. Sécurité (revue 2026-07-28) ==")
+import ssl as _ssl
+
+# R2#1 : allowlist des filtres --layer OSM avant l'osmosis shell (anti-injection).
+_legit = ["highway=*", "boundary=administrative", "building",
+          "addr:housenumber=*", "highway=residential,service,track"]
+_malins = ["highway=* & calc.exe", "x=y | whoami", "a=b > C:/pwn.txt",
+           "foo=%PATH%", 'q="evil"', "a=b`id`", "a;rm -rf", "a=b^c", "a=$(id)"]
+def _tag_ok(tokens):
+    try:
+        l2m._valider_osm_tags(tokens); return True
+    except SystemExit:
+        return False
+check("R2#1 filtres OSM légitimes acceptés", all(_tag_ok([t]) for t in _legit))
+check("R2#1 injections shell bloquées", all(not _tag_ok([t]) for t in _malins),
+      f"{sum(1 for t in _malins if _tag_ok([t]))} passées")
+
+# R2#3 : traversée de chemin sur nom de dalle d'index distant.
+_surs = ["LHD_FXX_0958_6279_MNT.tif", "tile.laz", "0958.copc.laz"]
+_dang = ["../evil.tif", "..\\evil.tif", "/etc/passwd", "C:\\x.tif",
+         "sub/dir/x.tif", "..", ".", "", "a\x00b.tif"]
+check("R2#3 basenames sûrs acceptés", all(l2m._nom_dalle_sur(n) for n in _surs))
+check("R2#3 noms piégés rejetés", all(not l2m._nom_dalle_sur(n) for n in _dang))
+def _cd_leve(n):
+    try:
+        l2m.chemin_dalle(Path("/cache/dalles"), n); return False
+    except ValueError:
+        return True
+    except Exception:
+        return False
+check("R2#3 chemin_dalle lève sur nom piégé", all(_cd_leve(n) for n in _dang))
+
+# R2#2 : vérification TLS stricte rétablie (certifi présent dans l'env de test).
+l2m._restaurer_tls_strict()
+_ctx = _ssl._create_default_https_context()
+check("R2#2 contexte TLS strict après restore",
+      _ctx.verify_mode == _ssl.CERT_REQUIRED and _ctx.check_hostname)
+
 print()
 print("TOUS OK" if ok_all else "ÉCHECS DÉTECTÉS")
 sys.exit(0 if ok_all else 1)
