@@ -15409,6 +15409,19 @@ def fusionner_geojson(fichiers, sortie):
         if not str(sortie).endswith(".gz"):
             sortie = Path(str(sortie) + ".gz")
 
+    # R2#5 : exclure la SORTIE de la liste des sources (idempotence). Sinon, quand
+    # la sortie tombe dans le glob d'entrée (--source data/*.geojson --output-file
+    # data/tout.geojson[.gz]), le 2e run re-fusionne l'ancienne sortie avec les
+    # originaux → entités DUPLIQUÉES, fichier qui gonfle à l'infini. Comparaison sur
+    # chemins RÉSOLUS. Placé DANS le cœur → protège tous les appelants (main_fusionner
+    # / main_wfs / main_decouper). sortie est déjà normalisée (.gz) au-dessus.
+    _sortie_res = sortie.resolve()
+    _n_src0 = len(fichiers)
+    fichiers = [f for f in fichiers if Path(f).resolve() != _sortie_res]
+    if len(fichiers) < _n_src0:
+        print(f"  (sortie exclue des sources, anti auto-fusion : {sortie.name})",
+              flush=True)
+
     sortie.parent.mkdir(parents=True, exist_ok=True)
     tmp = sortie.with_suffix(sortie.suffix + ".tmp")
 
