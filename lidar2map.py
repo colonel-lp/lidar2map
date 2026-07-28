@@ -1281,21 +1281,9 @@ def _bootstrap_venv_si_besoin():
     _gui_crit, _gui_opt = _gui_deps_plateforme()
     deps_critiques  = ["Pillow", "pyproj", "numpy", "scipy", "ijson",
                        "rasterio", "fiona", "pywebview", "certifi"] + _gui_crit
-    # Intel Macs require a specific Numba/LLVM combination because recent
-    # releases do not provide compatible wheels.
-    if platform.system() == "Darwin" and platform.machine() == "x86_64":
-        deps_optionnelles = [
-        "osmium",
-        "llvmlite==0.44.0",
-        "numba==0.61.2",
-        ] + _gui_opt
-     else:
-         deps_optionnelles = [
-          "osmium",
-          "numba",
-       ] + _gui_opt
-       deps_pip = deps_critiques + deps_optionnelles
-        print("  Installing dependencies in the venv (3-5 min)...")
+    deps_optionnelles = ["osmium", "numba"] + _gui_opt
+    deps_pip = deps_critiques + deps_optionnelles
+    print("  Installing dependencies in the venv (3-5 min)...")
 
       def _pip_install(pkgs):
         """Attempts pip install. Returns (success, stderr_msg)."""
