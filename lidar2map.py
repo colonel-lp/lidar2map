@@ -10166,11 +10166,18 @@ Examples:
                 print(f"  Ex: --source {src_path.name} --rmap")
                 sys.exit(1)
             # Livrables finaux régénérés d'office (cf. _convertir_un_mbtiles).
+            # R2#6/#50 : vérifier le retour (None = échec), FINALISER l'historique
+            # (sinon il reste « en cours » indéfiniment → GUI figée) et sortir en
+            # code non nul si échec (avant : exit 0 inconditionnel = succès menteur,
+            # aucun livrable possible malgré « ok »).
+            _conv_ok = True
             if args.rmap:
-                generer_rmap_depuis_mbtiles(src_path, ecraser=True)
+                _conv_ok = (generer_rmap_depuis_mbtiles(src_path, ecraser=True) is not None) and _conv_ok
             if args.sqlitedb:
-                generer_sqlitedb_depuis_mbtiles(src_path, ecraser=True)
-            sys.exit(0)
+                _conv_ok = (generer_sqlitedb_depuis_mbtiles(src_path, ecraser=True) is not None) and _conv_ok
+            _historique_depuis_argv(int(time.time() - (_HIST_T_DEBUT or time.time())),
+                                    statut=("ok" if _conv_ok else "ko"))
+            sys.exit(0 if _conv_ok else 1)
 
         elif ext in (".pbf", ".osm"):
             # Source OSM : traitée plus loin dans la section --osm
@@ -12791,11 +12798,16 @@ Examples:
             print(f"  Ex: --source {p.name} --sqlitedb")
             sys.exit(1)
         # Livrables finaux régénérés d'office (cf. _convertir_un_mbtiles).
+        # R2#6/#50 (jumeau du site LiDAR) : vérifier le retour (None = échec),
+        # finaliser l'historique et sortir en code non nul si échec.
+        _conv_ok = True
         if args.rmap:
-            generer_rmap_depuis_mbtiles(p, ecraser=True)
+            _conv_ok = (generer_rmap_depuis_mbtiles(p, ecraser=True) is not None) and _conv_ok
         if args.sqlitedb:
-            generer_sqlitedb_depuis_mbtiles(p, ecraser=True)
-        sys.exit(0)
+            _conv_ok = (generer_sqlitedb_depuis_mbtiles(p, ecraser=True) is not None) and _conv_ok
+        _historique_depuis_argv(int(time.time() - (_HIST_T_DEBUT or time.time())),
+                                statut=("ok" if _conv_ok else "ko"))
+        sys.exit(0 if _conv_ok else 1)
 
     # ── Normalisation des sorties ────────────────────────────────────────────
     # Si aucune sortie explicite → MBTiles par défaut

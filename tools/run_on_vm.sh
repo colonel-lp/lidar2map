@@ -42,9 +42,17 @@ echo "==> Mode   : $MODE"
 echo "==> Cible  : $VM"
 echo "==> Params : lidar2map $ARGS"
 
+# IP de VM cloud RECYCLEE (Hetzner reattribue les IP entre VM jetables) -> nouvelle
+# cle d'hote SSH -> refus "REMOTE HOST IDENTIFICATION HAS CHANGED". On purge
+# l'entree known_hosts perimee, puis accept-new accepte la nouvelle cle SANS
+# desactiver la securite (il refuse encore si un hote TOUJOURS connu change de
+# cle). Idempotent : ne fait rien si l'IP n'a pas d'entree perimee.
+_HOST="${VM#*@}"                       # user@host -> host (ou host tel quel)
+ssh-keygen -R "$_HOST" >/dev/null 2>&1 || true
+
 # MODE/SESSION/ARGS injectes en prefixe ; heredoc en quotes simples (<<'REMOTE')
 # donc RIEN n'est expanse localement : $HOME etc. sont evalues sur la VM.
-ssh -o ConnectTimeout=10 "$VM" \
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$VM" \
     "MODE='$MODE' SESSION='$SESSION' ARGS='$ARGS' bash -s" <<'REMOTE'
 set -euo pipefail
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
