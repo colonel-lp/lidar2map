@@ -556,6 +556,114 @@ _ctx = _ssl._create_default_https_context()
 check("R2#2 contexte TLS strict après restore",
       _ctx.verify_mode == _ssl.CERT_REQUIRED and _ctx.check_hostname)
 
+print("== 18. R1#8 : découverte EXACTE vs GRILLE (404 indexé = erreur) ==")
+# Le flag DISCOVER_EXACT distingue un index (WFS/STAC/registre : la dalle est
+# PROMISE → 404 = index périmé/panne = ERREUR) d'une grille synthétique (cellule
+# de bord → 404 légitime = 'absent'). Machinerie côté LazProvider + bascule côté
+# telecharger_dalle_directe.
+sys.path.insert(0, str(_APP.parent))            # rend le package `providers` importable
+from providers import common as _common_r18
+
+# Machinerie : le param du constructeur stocke le flag, défaut = False.
+_lp_def = _common_r18.LazProvider(
+    prefix="t", crs_epsg=2154, resolution=0.5, socle_possible=(2,),
+    defaults=(0.4, 2.5, (2,), "classes"))
+_lp_ex = _common_r18.LazProvider(
+    prefix="t", crs_epsg=2154, resolution=0.5, socle_possible=(2,),
+    defaults=(0.4, 2.5, (2,), "classes"), discover_exact=True)
+check("R1#8 LazProvider.discover_exact défaut False", _lp_def.discover_exact is False)
+check("R1#8 LazProvider discover_exact=True stocké", _lp_ex.discover_exact is True)
+
+# Intégration : un provider index ré-exporte True, un provider grille reste False.
+_fr = importlib.import_module("providers.fr_ign_laz")
+_dk = importlib.import_module("providers.dk_datafordeler_laz")
+check("R1#8 fr_ign_laz.DISCOVER_EXACT True (index WFS)",
+      getattr(_fr, "DISCOVER_EXACT", False) is True)
+check("R1#8 dk_datafordeler_laz défaut False (grille range×range)",
+      getattr(_dk, "DISCOVER_EXACT", False) is False)
+
+# Bascule : un 404 (taille 0) devient 'erreur' en mode exact, reste 'absent' sinon.
+class _FakeExact:
+    DISCOVER_EXACT = True
+    def subdir_from_name(self, nom): return ""
+class _FakeGrid:
+    DISCOVER_EXACT = False
+    def subdir_from_name(self, nom): return ""
+_prov0, _dl0, _delai0 = l2m.PROVIDER, l2m._download_to_tmp, l2m.DELAI_RETRY
+try:
+    l2m.DELAI_RETRY = 0
+    l2m._download_to_tmp = lambda url, tmp, timeout=60: 0   # simule un 404
+    with tempfile.TemporaryDirectory() as _d:
+        _dos = Path(_d)
+        l2m.PROVIDER = _FakeExact()
+        _r_ex = l2m.telecharger_dalle_directe("tile_exact.tif", "http://x/y", _dos)
+        l2m.PROVIDER = _FakeGrid()
+        _r_gr = l2m.telecharger_dalle_directe("tile_grid.tif", "http://x/y", _dos)
+    check("R1#8 exact + 404 -> 'erreur'", _r_ex == "erreur", f"(obtenu {_r_ex!r})")
+    check("R1#8 grille + 404 -> 'absent'", _r_gr == "absent", f"(obtenu {_r_gr!r})")
+finally:
+    l2m.PROVIDER, l2m._download_to_tmp, l2m.DELAI_RETRY = _prov0, _dl0, _delai0
+
+print("== 19. P1 contrats de format JPEG/PNG (R2#7 RMAP, R2#14 split) ==")
+import io as _io, struct as _st, sqlite3 as _sq
+from PIL import Image as _PImg
+
+def _png(color=(200, 100, 50, 255)):
+    b = _io.BytesIO(); _PImg.new("RGBA", (256, 256), color).save(b, "PNG")
+    return b.getvalue()
+def _jpg():
+    b = _io.BytesIO(); _PImg.new("RGB", (256, 256), (10, 20, 30)).save(b, "JPEG")
+    return b.getvalue()
+
+# R2#7 : helper _blob_vers_jpeg (RMAP = JPEG uniquement).
+_r = l2m._blob_vers_jpeg(_png())
+check("R2#7 PNG -> JPEG (magic FFD8FF)", _r is not None and _r[:3] == b'\xff\xd8\xff')
+_jb = _jpg()
+check("R2#7 JPEG -> inchangé (pas de re-encodage)", l2m._blob_vers_jpeg(_jb) is _jb)
+check("R2#7 blob indécodable -> None", l2m._blob_vers_jpeg(b"nope") is None)
+
+# R2#7 : intégration RMAP depuis mbtiles PNG → la tuile stockée est du JPEG.
+with tempfile.TemporaryDirectory() as _td:
+    _mb = Path(_td) / "t.mbtiles"
+    _c = _sq.connect(str(_mb))
+    _c.executescript("CREATE TABLE metadata(name TEXT,value TEXT);"
+                     "CREATE TABLE tiles(zoom_level INT,tile_column INT,"
+                     "tile_row INT,tile_data BLOB);")
+    _c.execute("INSERT INTO metadata VALUES('format','png')")
+    _c.execute("INSERT INTO tiles VALUES(?,?,?,?)", (10, 500, 300, _png()))
+    _c.commit(); _c.close()
+    _rm = l2m.generer_rmap_depuis_mbtiles(_mb, ecraser=True)
+    _tuile_jpeg = False
+    if _rm and _rm.exists():
+        _d = _rm.read_bytes()
+        _o = 19 + 4*3 + 4*2 + 4*2 + 4*2 + 8 + 4       # -> nZooms
+        _nz = _st.unpack_from("<i", _d, _o)[0]; _o += 4
+        _z0 = _st.unpack_from("<q", _d, _o)[0]
+        _p = _z0 + 4*2
+        _xt = _st.unpack_from("<i", _d, _p)[0]; _yt = _st.unpack_from("<i", _d, _p+4)[0]
+        _p += 8
+        _t0 = _st.unpack_from("<q", _d, _p)[0]
+        _tag = _st.unpack_from("<i", _d, _t0)[0]
+        _ln = _st.unpack_from("<i", _d, _t0+4)[0]
+        _payload = _d[_t0+8:_t0+8+_ln]
+        _tuile_jpeg = (_tag == 7 and _payload[:3] == b'\xff\xd8\xff'
+                       and _payload[:4] != b'\x89PNG')
+    check("R2#7 tuile RMAP depuis mbtiles PNG est bien du JPEG", _tuile_jpeg)
+
+# R2#14 : décision de format de sortie WMTS (source de vérité unique jumeaux).
+_f = l2m._jpeg_quality_sortie
+_matrice = [
+    ("image/png",  "auto", 85,   "PNG+auto -> convert"),
+    ("image/png",  "jpeg", 85,   "PNG+jpeg -> convert"),
+    ("image/png",  "png",  None, "PNG+png -> garder PNG"),
+    ("image/jpeg", "auto", None, "JPEG+auto -> garder JPEG"),
+    ("image/jpeg", "png",  None, "JPEG+png -> garder JPEG (pas de JPEG->PNG)"),
+]
+check("R2#14 matrice format de sortie (split == passe simple)",
+      all(_f(imf, ff, 85) == exp for imf, ff, exp, _ in _matrice),
+      detail=str([(_l, _f(imf, ff, 85)) for imf, ff, exp, _l in _matrice
+                  if _f(imf, ff, 85) != exp]))
+
 print()
 print("TOUS OK" if ok_all else "ÉCHECS DÉTECTÉS")
 sys.exit(0 if ok_all else 1)

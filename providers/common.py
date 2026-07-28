@@ -1234,12 +1234,19 @@ class LazProvider:
                    DOWNLOAD_WORKERS_MAX exposé par le module). Les nuages LAZ
                    pèsent ~200 Mo : à 8 en parallèle, IGN throttle et coupe la
                    connexion en silence (transferts tronqués) ; 3 max lisse ça.
+    discover_exact : True si la découverte interroge un INDEX (WFS/STAC/registre/
+                   GetFeature) qui liste les dalles qui EXISTENT réellement. Le
+                   cœur lit DISCOVER_EXACT (exposé par le module) : un 404 sur une
+                   dalle promise par l'index n'est alors PAS une absence légitime
+                   (index périmé/panne) mais une ERREUR (R1#8). False (défaut) =
+                   découverte GRILLE (ex. dk : range×range sur la bbox) où une
+                   cellule de bord sans donnée renvoie légitimement 404.
     """
 
     def __init__(self, *, prefix, crs_epsg, resolution, socle_possible,
                  defaults, csf_defaults=(0.5, 0.5, 1),
                  bounds_fn=None, discover_fn=None, zipped=False,
-                 tile_mb=205, download_workers_max=3):
+                 tile_mb=205, download_workers_max=3, discover_exact=False):
         self.prefix = prefix
         self.crs_epsg = crs_epsg
         self.resolution = resolution
@@ -1249,6 +1256,7 @@ class LazProvider:
         self.zipped = zipped
         self.tile_mb = tile_mb
         self.download_workers_max = download_workers_max
+        self.discover_exact = discover_exact
         # défauts exposés (lus par le cœur pour préremplir la GUI + par les tests)
         (self.def_hmin, self.def_hmax,
          self.def_classes, self.def_ground) = defaults

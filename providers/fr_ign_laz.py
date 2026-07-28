@@ -100,12 +100,15 @@ _P = common.LazProvider(
     defaults=(0.4, 2.5, (1, 2, 3, 4, 9, 66), "classes"),
     csf_defaults=(0.5, 0.5, 1),
     bounds_fn=_bounds_nominaux, discover_fn=_discover,
-    zipped=False, tile_mb=205)
+    zipped=False, tile_mb=205, discover_exact=True)
 
 # Plafond de téléchargements parallèles (lu par le cœur) : les nuages LAZ pèsent
 # ~205 Mo, à 8 en parallèle IGN throttle et tronque le transfert (cf. le retry
 # transitoire 400 IGN). 3 max lisse la charge ; le tuilage/ombrage garde --workers.
 DOWNLOAD_WORKERS_MAX = _P.download_workers_max
+# Découverte EXACTE (index WFS LiDAR HD) : un 404 = index périmé/panne, pas une
+# absence légitime → le cœur le classe 'erreur' au lieu d'"absent" (R1#8).
+DISCOVER_EXACT = _P.discover_exact
 
 # Défauts exposés (lus par le cœur pour préremplir la GUI + par les tests)
 LAZ_HMIN           = _P.def_hmin

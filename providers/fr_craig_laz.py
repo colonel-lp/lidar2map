@@ -61,11 +61,13 @@ _P = common.LazProvider(
     defaults=(0.4, 2.5, (2, 3, 4, 6), "csf"),
     csf_defaults=(0.5, 0.5, 1),
     bounds_fn=_bounds_nominaux, discover_fn=_discover,
-    zipped=False, tile_mb=15)
+    zipped=False, tile_mb=15, discover_exact=True)
 
 # Plafond de téléchargements parallèles (lu par le cœur) : tuiles CRAIG ~10-17 Mo
 # (bien plus petites que l'IGN) mais partage Nextcloud public, on reste prudent.
 DOWNLOAD_WORKERS_MAX = _P.download_workers_max
+# Découverte EXACTE (registre des campagnes classées) : 404 = erreur (R1#8).
+DISCOVER_EXACT = _P.discover_exact
 
 # Défauts exposés (lus par le cœur pour préremplir la GUI + par les tests)
 LAZ_HMIN           = _P.def_hmin

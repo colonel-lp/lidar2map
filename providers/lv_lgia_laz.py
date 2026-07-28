@@ -65,9 +65,11 @@ _P = common.LazProvider(
     defaults=(0.4, 2.5, (2, 3, 4, 5, 6), "csf"),
     csf_defaults=(0.5, 0.5, 1),
     bounds_fn=_bounds_nominaux, discover_fn=_discover,
-    zipped=False, tile_mb=80)
+    zipped=False, tile_mb=80, discover_exact=True)
 
 DOWNLOAD_WORKERS_MAX = _P.download_workers_max
+# Découverte EXACTE (index LĢIA probé) : 404 = erreur, pas absence (R1#8).
+DISCOVER_EXACT = _P.discover_exact
 
 # Défauts exposés (lus par le cœur pour préremplir la GUI + par les tests)
 LAZ_HMIN           = _P.def_hmin

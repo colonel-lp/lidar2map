@@ -3897,6 +3897,17 @@ def telecharger_dalle_directe(nom, url_wms, dossier, ecraser=False, compresser=F
                 taille = _download_to_tmp(url_wms, chemin_tmp, timeout=(10, 45))
                 if taille == 0:
                     chemin_tmp.unlink(missing_ok=True)
+                    # 404 propre. Provider à découverte EXACTE (index WFS/STAC/
+                    # registre : la dalle est PROMISE) → un 404 = index périmé ou
+                    # panne serveur, PAS une absence légitime (R1#8). On lève →
+                    # retry (un 404 sous throttle est parfois transitoire, cf. le
+                    # 400 IGN) → après épuisement, 'erreur' VISIBLE → l'invariant
+                    # erreur>0 stoppe le chunk (plus de trou marqué complet). En
+                    # découverte GRILLE (défaut), une cellule de bord 404 reste
+                    # une absence normale.
+                    if getattr(PROVIDER, "DISCOVER_EXACT", False):
+                        raise IOError("HTTP 404 sur dalle indexée "
+                                      "(provider à découverte exacte)")
                     return "absent"
                 if taille < SEUIL_DALLE_VALIDE:
                     with open(chemin_tmp, "rb") as _fh:
@@ -8629,6 +8640,21 @@ class ZoneHorsCouvertureWMTS(RuntimeError):
     pass
 
 
+def _jpeg_quality_sortie(img_fmt, formats_image, qualite_image):
+    """Qualité de re-encodage PNG→JPEG côté client, ou None si aucun re-encodage.
+
+    SOURCE DE VÉRITÉ UNIQUE partagée par la passe simple (main_wmts) et le split
+    (_traiter_bbox_wmts) : les deux jumeaux avaient divergé (le split convertissait
+    toujours PNG→JPEG en ignorant --image-format png, R2#14). Règles :
+      - serveur JPEG natif (ortho, scan*…) → None (jamais reconverti ; --image-format
+        png sur ces couches est signalé puis ignoré, cf. la note dans main_wmts) ;
+      - PNG natif + --image-format png → None (l'utilisateur garde le PNG lossless) ;
+      - PNG natif + --image-format jpeg/auto → la qualité demandée (conversion).
+    """
+    _native_png = img_fmt.lower() in ("image/png", "png")
+    return qualite_image if (_native_png and formats_image != "png") else None
+
+
 def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
                     zoom_min, zoom_max, layer, style, img_fmt,
                     apikey, apikey_requis, workers,
@@ -8666,6 +8692,17 @@ def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
     # Calculer _convert_png ici — utilisé pour _meta_fmt et dans _dl
     _convert_png = (jpeg_quality is not None
                     and img_fmt.lower() in ("image/png", "png"))
+    # Downgrade PROPRE si Pillow est absent : garder le PNG natif ET l'étiqueter
+    # png (cohérent), au lieu de télécharger tout puis rater chaque conversion.
+    # Le cas SYSTÉMATIQUE est neutralisé ici ; il ne reste dans _dl que l'échec
+    # SPORADIQUE (une tuile corrompue), qui doit lever et non mentir (R2#15).
+    if _convert_png:
+        try:
+            from PIL import Image as _PILchk  # noqa: F401
+        except ImportError:
+            print("  WARNING: Pillow unavailable, PNG->JPEG conversion disabled "
+                  "(tiles kept as PNG, metadata stays consistent).")
+            _convert_png = False
     _meta_fmt    = "jpeg" if _convert_png else fmt_ext
 
     con = sqlite3.connect(str(chemin_part))
@@ -8772,6 +8809,11 @@ def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
             _cache_file = _cache_path(z, x, y)
             if _cache_file.exists():
                 data = _cache_file.read_bytes()
+                # Cache d'un run buggé : un blob PNG écrit sous un nom .jpeg
+                # (ancien fallback silencieux) mentait sur le format. On le
+                # rejette pour re-télécharger+convertir proprement (R2#15).
+                if _convert_png and data[:3] != b'\xff\xd8\xff':
+                    data = None
         if data is None:
             data = telecharger_tuile(z, x, y, layer, style, img_fmt,
                                      apikey, apikey_requis)
@@ -8782,8 +8824,15 @@ def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
                     buf = io.BytesIO()
                     img.save(buf, "JPEG", quality=jpeg_quality, optimize=True)
                     data = buf.getvalue()
-                except Exception:
-                    pass  # fallback : garder le PNG original
+                except Exception as _e_conv:
+                    # Ne PAS garder le PNG sous un contrat jpeg (métadonnées
+                    # format=jpeg + cache .jpeg) : tuile mal étiquetée illisible
+                    # pour un lecteur strict. On lève → comptée en 'erreurs'
+                    # (drop honnête). Le cas systématique (Pillow absent) est
+                    # déjà neutralisé en amont, ne reste que le sporadique (R2#15).
+                    raise IOError(f"PNG->JPEG conversion failed for tile "
+                                  f"{z}/{x}/{y}: {type(_e_conv).__name__}: "
+                                  f"{_e_conv}") from _e_conv
             # Écrire dans le cache — écriture ATOMIQUE (temp + os.replace).
             # Une écriture interrompue (Ctrl+C, crash, disque plein) ne doit pas
             # laisser une tuile tronquée : au run suivant _cache_file.exists()
@@ -9048,6 +9097,36 @@ def _empty_jpeg_256():
                 b'\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJ'
                 b'STUVWXYZ\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xf8k\xff\xd9')
 
+def _blob_vers_jpeg(blob, quality=85):
+    """Convertit un blob de tuile en JPEG si besoin. Le format RMAP CompeGPS/
+    TwoNav ne stocke QUE du JPEG (offsets nommés jpegOffsets, tag 7) : recopier
+    un PNG (reliefs LRM/SVF/RRIM) tel quel produit un RMAP illisible (R2#7).
+
+    - déjà JPEG (magic FF D8 FF) → renvoyé inchangé (chemin rapide, pas de
+      décodage : les sources JPEG scan25/ortho ne paient rien) ;
+    - PNG/autre → décodé via PIL puis ré-encodé ; l'alpha est aplati sur le gris
+      des tuiles vides (JPEG n'a pas de canal alpha) ;
+    - indécodable → None (l'appelant substitue la tuile vide).
+    """
+    if blob[:3] == b'\xff\xd8\xff':       # déjà JPEG : rien à faire
+        return blob
+    try:
+        from PIL import Image as _Img
+        img = _Img.open(io.BytesIO(blob))
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            fond = _Img.new("RGB", img.size, (180, 180, 180))
+            fond.paste(img, mask=img.split()[-1])   # alpha comme masque
+            img = fond
+        else:
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
 # ── Fonction principale ────────────────────────────────────────────────────────
 
 def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
@@ -9146,6 +9225,8 @@ def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
 
         # ── Phase 2 : écriture séquentielle — offsets enregistrés à la volée ──
         zoom_hdr_offset = {}
+        _n_reenc     = 0   # tuiles PNG ré-encodées en JPEG (R2#7)
+        _n_illisible = 0   # tuiles indécodables remplacées par la tuile vide
 
         largeur = 30
         done    = 0
@@ -9213,8 +9294,19 @@ def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
                                 suivant = cur_t.fetchone()
                             if (suivant is not None and suivant[0] == col
                                     and suivant[1] == y_tms):
-                                jpeg = suivant[2]
+                                _blob = suivant[2]
                                 suivant = cur_t.fetchone()
+                                # RMAP = JPEG uniquement : un PNG (relief) doit
+                                # être ré-encodé, sinon TwoNav ne lit pas (R2#7).
+                                if _blob[:3] == b'\xff\xd8\xff':
+                                    jpeg = _blob
+                                else:
+                                    jpeg = _blob_vers_jpeg(_blob)
+                                    if jpeg is None:
+                                        jpeg = EMPTY_JPEG
+                                        _n_illisible += 1
+                                    else:
+                                        _n_reenc += 1
                             else:
                                 jpeg = EMPTY_JPEG
 
@@ -9269,6 +9361,11 @@ def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
         elapsed   = int(time.time() - t0)
         taille_mo = rmap.stat().st_size / 1e6
         print(f"\n  {rmap.name} : {taille_mo:.0f} MB  {_hms(elapsed)}")
+        if _n_reenc:
+            print(f"  Note: {_n_reenc:,} PNG tile(s) re-encoded to JPEG "
+                  f"(RMAP is a JPEG-only format; some quality loss expected)")
+        if _n_illisible:
+            print(f"  WARNING: {_n_illisible:,} undecodable tile(s) replaced by blank")
         return rmap
     finally:
         # Garantit la fermeture de la connexion SQLite même sur exception
@@ -12237,8 +12334,10 @@ def _traiter_bbox_wmts(args, bbox_wgs84, nom_z, nom_zone_base, layer, style, img
             chemin_mbtiles = dossier / f"{nom_fichier}.mbtiles"
             dossier_cache  = DOSSIER_CACHE / "ign_raster"
             dossier_cache.mkdir(parents=True, exist_ok=True)
-            _jpeg_q = (args.qualite_image
-                       if img_fmt.lower() in ("image/png", "png") else None)
+            # Source de vérité UNIQUE (fin du drift jumeau R2#14) : le split
+            # honore --image-format png comme la passe simple.
+            _jpeg_q = _jpeg_quality_sortie(img_fmt, args.formats_image,
+                                           args.qualite_image)
             _mbt_neuf = _mbtiles_a_regenerer(chemin_mbtiles, args.tuiles_ecraser)
             if _mbt_neuf:
                 generer_mbtiles_wmts(
@@ -12959,6 +13058,16 @@ Examples:
     # dans le MBTiles via re-encodage côté client (cf. _jpeg_q ci-dessous).
     fmt_ext = "jpg" if "jpeg" in img_fmt else "png"
 
+    # --image-format png sur une couche nativement JPEG (ortho, scan*, étatmajor) :
+    # convertir JPEG→PNG ne restaure aucune qualité (PNG lossless d'une image
+    # lossy = fichier bien plus lourd, zéro gain). On garde le JPEG en le
+    # SIGNALANT, au lieu d'ignorer le flag en silence (R2#14). Le sens inverse
+    # (PNG natif → jpeg) fonctionne, lui, via _jpeg_q.
+    if "jpeg" in img_fmt and args.formats_image == "png":
+        print(f"  Note: layer '{args.couche}' is served as JPEG; --image-format "
+              f"png ignored (PNG would only bloat the file, no quality gain). "
+              f"Keeping JPEG.")
+
     # ── Plafonnement zoom selon capacités réelles de la couche ───────────────
     # IGN : GetCapabilities WMTS. XYZ (naip…) : table _XYZ_ZOOM_LIMITS.
     # AVANT le bloc de découpage a-priori (qui `return`) : le capping vivait
@@ -13063,11 +13172,8 @@ Examples:
     #     refuse explicitement la conversion → on garde le PNG natif)
     #   - PNG natif + --formats-image jpeg/auto : _jpeg_q = qualité demandée
     #     → conversion PNG → JPEG (gain ~3-5× sur la taille MBTiles)
-    _native_png = img_fmt.lower() in ("image/png", "png")
-    if _native_png and args.formats_image != "png":
-        _jpeg_q = args.qualite_image
-    else:
-        _jpeg_q = None
+    # Source de vérité UNIQUE partagée avec le split _traiter_bbox_wmts (R2#14).
+    _jpeg_q = _jpeg_quality_sortie(img_fmt, args.formats_image, args.qualite_image)
 
     # Le MBTiles source doit être (re)généré si :
     #   - il n'existe pas encore

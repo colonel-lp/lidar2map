@@ -68,11 +68,13 @@ _P = common.LazProvider(
     defaults=(0.4, 2.5, (1, 2, 3, 4, 6, 9), "csf"),
     csf_defaults=(0.5, 0.5, 1),
     bounds_fn=_bounds_nominaux, discover_fn=_discover,
-    zipped=False, tile_mb=17)
+    zipped=False, tile_mb=17, discover_exact=True)
 
 # Plafond de téléchargements parallèles : tuiles ~17 Mo sur le portail public
 # Digitaal Vlaanderen → prudent, 3 max.
 DOWNLOAD_WORKERS_MAX = _P.download_workers_max
+# Découverte EXACTE (index DHMV II) : 404 = erreur, pas absence (R1#8).
+DISCOVER_EXACT = _P.discover_exact
 
 # Défauts exposés (lus par le cœur pour préremplir la GUI + par les tests)
 LAZ_HMIN           = _P.def_hmin
