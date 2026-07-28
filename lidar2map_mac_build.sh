@@ -107,7 +107,7 @@ rm -f "$FINAL_OUT/lidar2map"
 # 4. Archive zip pour distribution (ditto preserve permissions + symlinks +
 #    xattrs, indispensable pour une .app extractable sur un autre Mac)
 # ─────────────────────────────────────────────────────────────────────────────
-RELEASE_ZIP="$FINAL_OUT/lidar2map-macos-arm64.zip"
+RELEASE_ZIP="$FINAL_OUT/lidar2map-macos-x64.zip"
 echo ""
 echo "[4/4] Archive distribution (ditto)..."
 rm -f "$RELEASE_ZIP"
