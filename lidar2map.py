@@ -12679,12 +12679,26 @@ def main_decouper():
     sorties = decouper_mbtiles(src, cote_km=args.split_width,
                                n_cols=args.cols, n_rows=args.rows,
                                ecraser=args.tuiles_ecraser)
+    _nb_ko = 0
     for sf in sorties:
         # Livrables finaux régénérés d'office (cf. _convertir_un_mbtiles).
-        if args.rmap:     generer_rmap_depuis_mbtiles(sf, ecraser=True)
-        if args.sqlitedb: generer_sqlitedb_depuis_mbtiles(sf, ecraser=True)
+        _conv_ok = True
+        if args.rmap:
+            _conv_ok = (generer_rmap_depuis_mbtiles(sf, ecraser=True) is not None) and _conv_ok
+        if args.sqlitedb:
+            _conv_ok = (generer_sqlitedb_depuis_mbtiles(sf, ecraser=True) is not None) and _conv_ok
+        # Ne PAS supprimer le mbtiles intermédiaire si une conversion demandée a
+        # échoué : sinon on efface la seule donnée survivante (R2#6). On le garde
+        # comme filet, même quand l'utilisateur n'avait pas demandé le mbtiles.
+        if not _conv_ok:
+            _nb_ko += 1
+            print(f"  WARNING: conversion(s) failed for {sf.name}; .mbtiles kept.")
+            continue
         if not args.mbtiles and sf != src and sf.exists():
             sf.unlink()
+    if _nb_ko:
+        print(f"\n  Splitting done with {_nb_ko} conversion failure(s).")
+        sys.exit(1)
     print("\n  Splitting done.")
 
 
@@ -14363,13 +14377,20 @@ def _decouvrir_url_bdtopo_gpkg(num_dep):
     return None, None
 
 
-def _telecharger_bdtopo_gpkg(num_dep, url, nom_ressource):
-    """Télécharge et extrait le .7z BD TOPO, met le .gpkg en cache. Retourne Path ou None."""
+def _telecharger_bdtopo_gpkg(num_dep, url, nom_ressource, ecraser=False):
+    """Télécharge et extrait le .7z BD TOPO, met le .gpkg en cache. Retourne Path ou None.
+
+    ecraser=True (--download-overwrite) force le re-téléchargement même si un
+    GPKG est déjà en cache (sinon un GPKG périmé/corrompu était réutilisé
+    indéfiniment malgré l'option, R2#31)."""
     dep_padded = str(num_dep).zfill(3)
     cache_dir  = DOSSIER_CACHE / "bdtopo"
     cache_dir.mkdir(parents=True, exist_ok=True)
     gpkg_path = cache_dir / f"{nom_ressource}.gpkg"
 
+    if ecraser and gpkg_path.exists():
+        gpkg_path.unlink()
+        print(f"  GPKG cache: {gpkg_path.name} -> overwrite (re-download)", flush=True)
     if gpkg_path.exists() and gpkg_path.stat().st_size > 10_000_000:
         print(f"  GPKG cache: {gpkg_path.name} "
               f"({gpkg_path.stat().st_size/1e6:.0f} MB) reused", flush=True)
@@ -14780,7 +14801,7 @@ def _telecharger_bdtopo_bulk(num_dep, couches_resolues, nom_zone,
     url, nom = _decouvrir_url_bdtopo_gpkg(num_dep)
     if not url:
         return None
-    gpkg_path = _telecharger_bdtopo_gpkg(num_dep, url, nom)
+    gpkg_path = _telecharger_bdtopo_gpkg(num_dep, url, nom, ecraser=ecraser)
     if not gpkg_path:
         return None
 
@@ -14907,6 +14928,30 @@ def main_wfs():
         )
         if sorties_bulk is not None:
             sorties = sorties_bulk
+            # Bulk PARTIEL : certaines couches ne sont pas dans le GPKG (ou
+            # extraction ratée). On les rejoue en WFS pagination au lieu de les
+            # abandonner (R2#31). Nommage BDTOPO_V3 identique bulk/WFS
+            # (`{nom_zone}_ign_{suf}`) → pas de doublon, pas d'écrasement.
+            if len(sorties_bulk) < len(couches_resolues):
+                _couvertes = {Path(p).name for p in sorties_bulk}
+                _ratees = []
+                for _tn, _desc in couches_resolues:
+                    _lk = _tn.split(":")[-1].lower()
+                    if (f"{nom_zone}_ign_{_lk}.geojson.gz"  not in _couvertes and
+                            f"{nom_zone}_ign_{_lk}.geojson" not in _couvertes):
+                        _ratees.append((_tn, _desc))
+                if _ratees:
+                    print(f"  Bulk covered {len(sorties_bulk)}/{len(couches_resolues)} "
+                          f"layers; retrying {len(_ratees)} via WFS pagination...")
+                    for _tn, _desc in _ratees:
+                        print(f"\n  [{_desc}]")
+                        _f = telecharger_wfs(
+                            _tn, lon_min, lat_min, lon_max, lat_max,
+                            nom_zone, dossier,
+                            ecraser_telechargement=args.telechargement_ecraser,
+                            formats=_gj_formats)
+                        if _f:
+                            sorties.append(_f)
         else:
             print("  Falling back to WFS pagination...")
 
@@ -14991,15 +15036,19 @@ def main_wfs():
     print(f"  Done! Folder: {dossier}")
     for s in sorties:
         print(f"  → {s}")
-    _historique_depuis_argv(elapsed, str(dossier))
     # Échec partiel (couches manquantes) = échec visible : les livrables
-    # produits restent, mais GUI/scripts/CI doivent le voir. RuntimeError et
-    # PAS sys.exit(1) : SystemExit traverserait la boucle multi-départements
-    # (qui ne rattrape que Exception, exprès) et tuerait les départements
-    # suivants ; l'Exception y est rattrapée → dept marqué KO, on continue,
-    # et le code global non-zéro vient du bilan _deps_ko. En mono-département
-    # elle remonte au top-level → code non-zéro aussi.
-    if len(sorties) < len(couches_resolues):
+    # produits restent, mais GUI/scripts/CI doivent le voir. On finalise
+    # l'historique avec le statut RÉEL (ko si partiel) AVANT de lever, sinon
+    # l'entrée resterait marquée 'ok' pour un run incomplet (R2#50).
+    _wfs_partiel = len(sorties) < len(couches_resolues)
+    _historique_depuis_argv(elapsed, str(dossier),
+                            statut=("ko" if _wfs_partiel else "ok"))
+    # RuntimeError et PAS sys.exit(1) : SystemExit traverserait la boucle
+    # multi-départements (qui ne rattrape que Exception, exprès) et tuerait les
+    # départements suivants ; l'Exception y est rattrapée → dept marqué KO, on
+    # continue, et le code global non-zéro vient du bilan _deps_ko. En
+    # mono-département elle remonte au top-level → code non-zéro aussi.
+    if _wfs_partiel:
         raise RuntimeError(f"{len(couches_resolues) - len(sorties)} WFS "
                            f"layer(s) failed - rerun to retry them")
 
@@ -15393,7 +15442,7 @@ def _lire_geojson(chemin):
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def fusionner_geojson(fichiers, sortie):
+def fusionner_geojson(fichiers, sortie, fichiers_ignores=None):
     """
     Fusionne plusieurs GeoJSON en un seul FeatureCollection — STREAMING.
 
@@ -15401,8 +15450,12 @@ def fusionner_geojson(fichiers, sortie):
     écriture incrémentale dans le .gz au fil de l'eau. La bbox WGS84 est
     calculée pendant la passe d'écriture (pas de re-lecture nécessaire).
 
-    fichiers : liste de Path ou str
-    sortie   : Path de sortie
+    fichiers         : liste de Path ou str
+    sortie           : Path de sortie
+    fichiers_ignores : si une liste est fournie, les noms des sources SAUTÉES
+                       (absentes ou illisibles) y sont ajoutés — l'appelant peut
+                       ainsi distinguer une fusion COMPLÈTE d'une fusion PARTIELLE
+                       et sortir en erreur au lieu d'annoncer un faux succès (R2#37).
     Retourne (Path créé, bbox|None) — bbox = (lon_min, lat_min, lon_max, lat_max),
     ou (None, None) si aucune feature à fusionner.
     """
@@ -15493,18 +15546,35 @@ def fusionner_geojson(fichiers, sortie):
         if _has_ijson:
             opener = ((lambda: gzip.open(p, "rb")) if str(p).endswith(".gz")
                       else (lambda: open(p, "rb")))
+            _n_yield = 0
             try:
                 with opener() as fh:
                     for feat in ijson.items(fh, "features.item"):
+                        _n_yield += 1
                         yield source, feat
                 return
-            except (OSError, ValueError) as e:
+            # Rattrape AUSSI les erreurs de parsing ijson (IncompleteJSONError,
+            # etc. — pas des ValueError) : sans ça un seul source corrompu faisait
+            # crasher toute la fusion au lieu d'être sauté (R2#37). KeyboardInterrupt
+            # est une BaseException → non capturée, Ctrl+C remonte toujours.
+            except Exception as e:
+                if _n_yield:
+                    # Des features ont déjà été émises → NE PAS relire en RAM
+                    # (relecture depuis le début = doublons). Source tronquée,
+                    # marquée ignorée (fusion partielle visible côté appelant).
+                    print(f"  WARNING: {p.name} truncated after {_n_yield} "
+                          f"features ({e}) - partial source skipped")
+                    if fichiers_ignores is not None:
+                        fichiers_ignores.append(p.name)
+                    return
                 print(f"  WARNING: {p.name} streaming failed ({e}) - RAM fallback")
-        # Fallback non-streaming
+        # Fallback non-streaming (seulement si le streaming n'a rien émis)
         try:
             data = _lire_geojson(p)
         except Exception as e:
             print(f"  WARNING: {p.name} illisible ({e}) - skipped")
+            if fichiers_ignores is not None:
+                fichiers_ignores.append(p.name)
             return
         for feat in data.get("features", []):
             yield source, feat
@@ -15528,6 +15598,8 @@ def fusionner_geojson(fichiers, sortie):
                     p = p_gz
             if not p.exists():
                 print(f"  WARNING: {p.name} not found - skipped")
+                if fichiers_ignores is not None:
+                    fichiers_ignores.append(p.name)
                 continue
 
             n_fichier = 0
@@ -15629,7 +15701,15 @@ Examples:
     parser.add_argument("--vector-simplify", "--simplification-vecteur", type=float, default=None,
                         metavar="M", dest="simplification_vecteur",
                         help="Douglas-Peucker epsilon in metres (default: auto from area).")
-    args, _ = parser.parse_known_args()  # ignorer --zone-* et autres args globaux
+    args, _extra = parser.parse_known_args()  # tolère d'éventuels tokens globaux
+    # Signaler les options non reconnues (typos) au lieu de les avaler en
+    # silence : `--outut-file x` était sinon ignoré et la sortie retombait sur
+    # le nom par défaut sans prévenir (R2#37). On ne signale que les tokens en
+    # `--…` (une valeur isolée peut être un reliquat légitime).
+    _opts_inconnues = [t for t in _extra if t.startswith("--")]
+    if _opts_inconnues:
+        print("  WARNING: unrecognized option(s) ignored (typo?): "
+              + " ".join(_opts_inconnues))
     # Crash-safe : sauver l'entrée 'en cours' AVANT toute opération longue.
     _historique_debut()
 
@@ -15668,8 +15748,10 @@ Examples:
         print(f"  + {f}")
     print(f"  → {sortie}")
 
-    fusion_result = fusionner_geojson(fichiers, sortie)
-    if fusion_result and fusion_result[0] is not None:
+    _ignores = []
+    fusion_result = fusionner_geojson(fichiers, sortie, fichiers_ignores=_ignores)
+    _fusion_ok = bool(fusion_result and fusion_result[0] is not None)
+    if _fusion_ok:
         result, bbox = fusion_result
         fmts = [f.lower() for f in args.formats_fichier]
         # Générer le .map Mapsforge si demandé
@@ -15701,7 +15783,18 @@ Examples:
                 result, sortie.parent / f"{nom_zone}_transparent.sqlitedb",
                 _zmin, _zmax, ecraser=True, bbox_wgs84=bbox)
         print(f"\n  Done in {_hms(int(time.time()-t_debut))}")
-    _historique_depuis_argv(int(time.time()-t_debut))
+    else:
+        print("  ERROR: merge produced no output (no readable source feature)")
+    # Fusion PARTIELLE (sources sautées) = échec visible : le livrable produit
+    # reste, mais GUI/scripts/CI doivent le voir (famille succès silencieux, R2#37).
+    if _ignores:
+        print(f"\n  WARNING: {len(_ignores)} source(s) skipped "
+              f"(missing/unreadable): " + ", ".join(_ignores))
+    _echec = (not _fusion_ok) or bool(_ignores)
+    _historique_depuis_argv(int(time.time()-t_debut),
+                            statut=("ko" if _echec else "ok"))
+    if _echec:
+        sys.exit(1)
 
 
 # ── Persistence d'historique 'crash-safe' ──────────────────────────────────
