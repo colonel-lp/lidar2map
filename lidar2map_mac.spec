@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Spec PyInstaller pour lidar2map — macOS ARM64, onedir, JRE+osmosis+mapwriter bundlés.
+Spec PyInstaller pour lidar2map — macOS x86_64, onedir, JRE+osmosis+mapwriter bundlés.
 
 Usage :
     ~/.lidar2map/venv/bin/pyinstaller lidar2map_mac.spec --clean --noconfirm
@@ -339,7 +339,7 @@ exe = EXE(
     console=CONSOLE,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch='arm64',
+    target_arch='x86_64',
     codesign_identity=None,
     entitlements_file=None,
     icon=None,
