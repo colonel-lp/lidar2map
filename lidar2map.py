@@ -11905,6 +11905,7 @@ def _run_split_priori(args, sous_zones, mode_desc, nom_zone, racine_pr,
         print(f"  Resume: {nb_done}/{n_total} chunks already done")
 
     nb_ok = 0
+    nb_incomplet = 0
     for i_z, sz in enumerate(sous_zones):
         i_lat, i_lon = sz[0], sz[1]
         coords = tuple(sz[2:])
@@ -11925,6 +11926,41 @@ def _run_split_priori(args, sous_zones, mode_desc, nom_zone, racine_pr,
         t0_z = time.time()
         try:
             traiter_chunk(coords, nom_z, cle, manifeste)
+            # Transactionnel (#1/#3, fix 2026-07-28) : ne marquer FAIT qu'un chunk
+            # dont la sortie est COMPLÈTE, et nettoyer AVANT fin_morceau (fait =>
+            # purgé). generer_mbtiles retourne None sur échec (rangées KO / 0 tuile
+            # depuis une source > 1 Mo) SANS lever ; l'ancien code appelait
+            # fin_morceau quand même → deja_traite sautait le chunk au re-run → trou
+            # de couverture PERMANENT (le « Rerun to complete » ne se rejouait
+            # jamais). Un chunk SANS couverture (discover {} : mer/hors frontière →
+            # aucun .tif au manifeste) reste légitimement vide-et-fait.
+            _dossier_chunk = racine_pr / nom_z
+            _mbts = list(_dossier_chunk.glob("*.mbtiles"))
+            _complet    = bool(_mbts) and all(_mbtiles_est_complete(m) for m in _mbts)
+            _avait_couv = any(str(_f).lower().endswith(".tif")
+                              for _f in manifeste.fichiers_morceau(cle))
+            if _avait_couv and not _complet:
+                # Couverture présente mais mbtiles absent/vide = VRAI échec de
+                # tuilage. On NE marque PAS fait (rejoué au re-run), on garde les
+                # intermédiaires (cache de warp/nuage) pour la reprise.
+                print(f"  [{cle}] ⚠ INCOMPLETE (coverage present but no valid mbtiles)"
+                      f" - NOT marked done, rerun to complete (intermediates kept)")
+                nb_incomplet += 1
+                continue
+            if getattr(args, "nettoyage", False) and _complet:
+                # Cleanup AVANT fin_morceau : un crash entre les deux laisse le
+                # chunk à refaire (re-run : mbtiles présent → tuilage sauté →
+                # cleanup rejoué → fait). --cleanup-keep-tiles épargne le cache de
+                # dalles ET le cache de nuages .laz (cloud_cache_dir) : la
+                # reconversion sans re-download (pre_download) en dépend.
+                if getattr(args, "nettoyage_garder_dalles", False):
+                    _keep = [_dossier_dalles_actif(args)]
+                    _cloud_cache = getattr(args, "_cloud_cache_dir", None)
+                    if _cloud_cache is not None:
+                        _keep.append(_cloud_cache)
+                else:
+                    _keep = None
+                _supprimer_fichiers(manifeste.fichiers_morceau(cle), _keep)
             manifeste.fin_morceau(cle, int(time.time() - t0_z))
             print(f"  [{cle}] ✓ Done in {_hms(int(time.time() - t0_z))}")
             _n_done, _eta = manifeste.eta_global(n_total)
@@ -11932,32 +11968,6 @@ def _run_split_priori(args, sous_zones, mode_desc, nom_zone, racine_pr,
                 print(f"  [{cle}] {_n_done}/{n_total} done, "
                       f"ETA ~{_hms(_eta)} remaining (coarse)")
             nb_ok += 1
-            if getattr(args, "nettoyage", False):
-                # Chunk au mbtiles vide OU sans mbtiles (mer hors couverture, ou
-                # bug à diagnostiquer) : on conserve les intermédiaires pour
-                # inspection plutôt que tout supprimer silencieusement.
-                _dossier_chunk = racine_pr / nom_z
-                _mbts = list(_dossier_chunk.glob("*.mbtiles"))
-                _has_empty = (not _mbts) or any(
-                    not _mbtiles_est_complete(mbt) for mbt in _mbts)
-                if _has_empty:
-                    print(f"  [{cle}] mbtiles empty or missing - cleanup skipped (intermediates kept for inspection)")
-                else:
-                    # --cleanup-keep-tiles : épargner le cache de dalles, qu'une
-                    # tâche ultérieure de la même file va relire (cf. GUI, qui
-                    # ne pose ce flag que sur les tâches non-finales d'un groupe
-                    # provider×surface×zone). En mode LAZ, épargner AUSSI le cache
-                    # de nuages .laz (cloud_cache_dir) : la reconversion sans
-                    # re-download (pre_download) en dépend. Sans lui, le nuage
-                    # qu'on vient de déclarer au manifeste serait supprimé.
-                    if getattr(args, "nettoyage_garder_dalles", False):
-                        _keep = [_dossier_dalles_actif(args)]
-                        _cloud_cache = getattr(args, "_cloud_cache_dir", None)
-                        if _cloud_cache is not None:
-                            _keep.append(_cloud_cache)
-                    else:
-                        _keep = None
-                    _supprimer_fichiers(manifeste.fichiers_morceau(cle), _keep)
         except ZoneHorsCouvertureWMTS:
             # Chunk auto-généré entièrement hors couverture (mer, hors frontière) :
             # légitimement vide, pas une bbox erronée. On le marque fait et on
@@ -11973,6 +11983,9 @@ def _run_split_priori(args, sous_zones, mode_desc, nom_zone, racine_pr,
 
     elapsed = int(time.time() - t_debut)
     print(f"\n  ══ A-priori splitting done: {nb_ok}/{n_total} chunks ==")
+    if nb_incomplet:
+        print(f"  ⚠ {nb_incomplet} chunk(s) INCOMPLETE (not marked done) - "
+              f"rerun to complete them")
     print(f"  Total time: {_hms(elapsed)}")
 
     # Planche d'assemblage : balaie les livrables produits (mbtiles/sqlitedb/…)

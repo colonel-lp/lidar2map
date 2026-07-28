@@ -131,6 +131,46 @@ calls, exc = _run(r3, overwrite=False, hors_couv="001x001")
 check("ZoneHorsCouverture : pas fatal, chunk marqué fait",
       exc is None and calls == ["001x001", "001x002"]
       and l2m.Manifeste(r3 / "ztest" / "manifeste.json").deja_traite("001x001"))
+
+# Transactionnel (#1/#3, fix 2026-07-28) : generer_mbtiles retourne None sur
+# échec de tuilage SANS lever ; l'ancien code marquait fin_morceau quand même →
+# deja_traite sautait le chunk au re-run → trou de couverture PERMANENT. Le garde
+# distingue « couverture présente (.tif au manifeste) mais pas de mbtiles complet »
+# = échec, à NE PAS marquer fait, de « aucune couverture » = vide légitime, fait.
+import sqlite3 as _sql
+def _mbtiles_valide(p):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    _c = _sql.connect(str(p))
+    _c.execute("CREATE TABLE tiles (zoom_level int, tile_column int, "
+               "tile_row int, tile_data blob)")
+    _c.execute("INSERT INTO tiles VALUES (10,1,1,?)", (b"x",))
+    _c.commit(); _c.close()
+
+def _run_couv(racine, produit_mbtiles):
+    def traiter(coords, nom_z, cle, manifeste):
+        _tif = racine / nom_z / f"{nom_z}_dalle.tif"
+        _tif.parent.mkdir(parents=True, exist_ok=True); _tif.write_bytes(b"x")
+        manifeste.enregistrer_fichier(str(_tif), cle)      # couverture présente
+        if produit_mbtiles:
+            _mbtiles_valide(racine / nom_z / f"{nom_z}_z10-13.mbtiles")
+    try:
+        l2m._run_split_priori(args_ns, sous_zones, "test", "ztest", racine,
+                              False, lambda c: f"bbox {c}", traiter, time.time())
+    except Exception:
+        pass
+
+r4 = tmp / "split4"; (r4 / "ztest").mkdir(parents=True)
+_run_couv(r4, produit_mbtiles=False)
+_m4 = l2m.Manifeste(r4 / "ztest" / "manifeste.json")
+check("couverture SANS mbtiles complet → chunk PAS marqué fait (rejouable au re-run)",
+      not _m4.deja_traite("001x001") and not _m4.deja_traite("001x002"))
+
+r5 = tmp / "split5"; (r5 / "ztest").mkdir(parents=True)
+_run_couv(r5, produit_mbtiles=True)
+_m5 = l2m.Manifeste(r5 / "ztest" / "manifeste.json")
+check("couverture AVEC mbtiles complet → chunk marqué fait",
+      _m5.deja_traite("001x001") and _m5.deja_traite("001x002"))
+
 l2m._planche_depuis_dossier = _planche_orig
 
 
