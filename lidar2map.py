@@ -1285,7 +1285,7 @@ def _bootstrap_venv_si_besoin():
     deps_pip = deps_critiques + deps_optionnelles
     print("  Installing dependencies in the venv (3-5 min)...")
 
-      def _pip_install(pkgs):
+    def _pip_install(pkgs):
         """Attempts pip install. Returns (success, stderr_msg)."""
         try:
             r = subprocess.run(
