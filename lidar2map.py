@@ -5663,57 +5663,67 @@ def _lrm_chunked(src_path, dst_path, sigma_px):
         nodata     = None,
     )
 
-    # ── Passe 2 : traitement bloc par bloc ──────────────────────────────────
+    # ── Passe 2 : traitement bloc par bloc, CALCUL parallélisé ──────────────
+    # Les blocs sont indépendants (chacun lit sa fenêtre + marge 4σ) et
+    # gaussian_filter relâche le GIL en C → on parallélise le CALCUL sur un pool
+    # de threads (~×Ncœurs quand σ est grand). MAIS les datasets GDAL/rasterio ne
+    # sont PAS thread-safe en accès concurrent : src.read et dst.write RESTENT sur
+    # le thread principal (I/O rapide), seul le gaussien tourne en parallèle. En
+    # vol : au plus ~2×workers blocs (RAM bornée, indépendante de la taille du
+    # raster). Sortie BIT-IDENTIQUE au séquentiel (même math, même ordre d'écriture).
     total_chunks = ((H + CHUNK - 1) // CHUNK) * ((W + CHUNK - 1) // CHUNK)
     n_done = 0
+    _nw = max(1, min(os.cpu_count() or 4, 16))
+
+    def _compute_bloc(block, crop):
+        """Pur calcul (relâche le GIL dans _gf) : LRM + normalisation + crop marge."""
+        _dr0, _dc0, _dr1, _dc1 = crop
+        nd = _nodata_mask(block, nodata)
+        # Remplissage par la moyenne GLOBALE (passe 1), pas celle du bloc (couture).
+        smooth = _gf(np.where(nd, mean_g, block), sigma=sigma_px)
+        lrm_block = block - smooth
+        lrm_block[nd] = np.nan
+        arr_f  = np.clip((lrm_block - p5_g) / (p95_g - p5_g), 0.0, 1.0) * 255.0
+        arr_u8 = np.nan_to_num(arr_f, nan=128.0).astype(np.uint8)
+        arr_u8[nd] = 128   # valeur neutre pour les nodata
+        return arr_u8[_dr0:_dr1, _dc0:_dc1]   # zone centrale (marge enlevée)
+
     with _rio.open(str(src_path)) as src, \
-         _rio.open(str(dst_path), "w", **out_profile) as dst:
+         _rio.open(str(dst_path), "w", **out_profile) as dst, \
+         ThreadPoolExecutor(max_workers=_nw) as _ex:
+        _pending = []   # (future, win_write) dans l'ordre de soumission
+
+        def _ecrire(fut, win_write):
+            nonlocal n_done
+            dst.write(fut.result()[np.newaxis, :, :], window=win_write)
+            n_done += 1
+            pct = n_done * 100 // total_chunks
+            print(f"\r  LRM chunked: {pct:3d}% ({n_done}/{total_chunks} blocks,"
+                  f" {_nw} threads)   ", end="", flush=True)
 
         for row_off in range(0, H, CHUNK):
             for col_off in range(0, W, CHUNK):
-                # Fenêtre centrale (sortie)
                 row_end = min(row_off + CHUNK, H)
                 col_end = min(col_off + CHUNK, W)
+                r0 = max(0, row_off - MARGIN); c0 = max(0, col_off - MARGIN)
+                r1 = min(H, row_end + MARGIN); c1 = min(W, col_end + MARGIN)
 
-                # Fenêtre étendue avec marge (lecture)
-                r0 = max(0, row_off - MARGIN)
-                c0 = max(0, col_off - MARGIN)
-                r1 = min(H, row_end + MARGIN)
-                c1 = min(W, col_end + MARGIN)
-
-                win_read  = Window(c0, r0, c1 - c0, r1 - r0)
-                block     = src.read(1, window=win_read).astype(np.float32)
-
-                nd_mask = _nodata_mask(block, nodata)
-                # Remplissage par la moyenne GLOBALE (passe 1) — pas celle du
-                # bloc, qui varierait d'un bloc à l'autre → couture gaussienne.
-                block_fill = np.where(nd_mask, mean_g, block)
-
-                smooth    = _gf(block_fill, sigma=sigma_px)
-                lrm_block = block - smooth
-                lrm_block[nd_mask] = np.nan
-
-                # Normalisation avec les percentiles globaux
-                arr_f = np.clip((lrm_block - p5_g) / (p95_g - p5_g), 0.0, 1.0) * 255.0
-                arr_u8 = np.nan_to_num(arr_f, nan=128.0).astype(np.uint8)
-                arr_u8[nd_mask] = 128   # valeur neutre pour les nodata
-
-                # Découpe de la marge (on ne garde que la zone centrale)
-                dr0 = row_off - r0
-                dc0 = col_off - c0
-                dr1 = dr0 + (row_end - row_off)
-                dc1 = dc0 + (col_end - col_off)
-                centre = arr_u8[dr0:dr1, dc0:dc1]
-
+                block = src.read(1, window=Window(c0, r0, c1 - c0, r1 - r0)
+                                 ).astype(np.float32)
+                crop  = (row_off - r0, col_off - c0,
+                         (row_off - r0) + (row_end - row_off),
+                         (col_off - c0) + (col_end - col_off))
                 win_write = Window(col_off, row_off, col_end - col_off, row_end - row_off)
-                dst.write(centre[np.newaxis, :, :], window=win_write)
 
-                n_done += 1
-                pct = n_done * 100 // total_chunks
-                print(f"\r  LRM chunked: {pct:3d}% ({n_done}/{total_chunks} blocks)   ",
-                      end="", flush=True)
+                _pending.append((_ex.submit(_compute_bloc, block, crop), win_write))
+                if len(_pending) >= _nw * 2:      # borne RAM : ~2×workers en vol
+                    _f, _w = _pending.pop(0); _ecrire(_f, _w)
 
-    print(f"\r  LRM chunked: done ({total_chunks} blocks, σ={sigma_px} px)          ")
+        for _f, _w in _pending:                    # drain final, dans l'ordre
+            _ecrire(_f, _w)
+
+    print(f"\r  LRM chunked: done ({total_chunks} blocks, σ={sigma_px} px,"
+          f" {_nw} threads)          ")
     return True
 
 
