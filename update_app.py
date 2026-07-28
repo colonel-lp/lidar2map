@@ -9,7 +9,7 @@
 #      Patche lidar2map_bundle.zip à côté du script ou dans dist/.
 #
 #   2. Archive macOS (édition chirurgicale depuis n'importe quel OS) :
-#        python update_app.py lidar2map-macos-arm64.zip
+#        python update_app.py lidar2map-macos-x86_64.zip
 #      Patch chirurgical du bundle interne en préservant les permissions
 #      Unix de Contents/MacOS/lidar2map (bit exécutable).
 #
@@ -267,7 +267,7 @@ def _download_with_progress(url, dest, tentatives=3):
 _ASSET_SPECS = [
     ("windows-x86_64.zip",    "zip",   "application/zip"),
     ("linux-x86_64.tar.gz",   "targz", "application/gzip"),
-    ("macos-arm64.zip",       "zip",   "application/zip"),
+    ("macos-x86_64.zip",       "zip",   "application/zip"),
 ]
 
 
@@ -477,8 +477,8 @@ def _find_macos_archive():
         _p = Path(_a)
         if _p.exists() and _p.suffix == ".zip" and "macos" in _p.name.lower():
             return _p.resolve()
-    for _c in (HERE / "lidar2map-macos-arm64.zip",
-               HERE / "dist" / "lidar2map-macos-arm64.zip"):
+    for _c in (HERE / "lidar2map-macos-x86_64.zip",
+               HERE / "dist" / "lidar2map-macos-x86_64.zip"):
         if _c.exists():
             return _c
     return None
@@ -519,7 +519,7 @@ if "--release" in sys.argv:
     _do_release(_tag, new_content, dry_run="--dry-run" in sys.argv)
     sys.exit(0)
 
-# Mode archive macOS : argument .zip macOS OU lidar2map-macos-arm64.zip auto-détecté
+# Mode archive macOS : argument .zip macOS OU lidar2map-macos-x86_64.zip auto-détecté
 _archive = _find_macos_archive()
 if _archive:
     _update_macos_archive(_archive, new_content)
