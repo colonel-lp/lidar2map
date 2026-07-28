@@ -9297,9 +9297,22 @@ def generer_sqlitedb_depuis_mbtiles(mbtiles_path, ecraser=False):
             meta = dict(con_mb.execute("SELECT name, value FROM metadata").fetchall())
         except Exception:
             pass
-        zoom_min = int(meta.get("minzoom", 0))
-        zoom_max = int(meta.get("maxzoom", 17))
         total = con_mb.execute("SELECT COUNT(*) FROM tiles").fetchone()[0]
+        # R2#11 : ne PAS publier un sqlitedb VIDE comme un succès. 0 tuile =
+        # overlay grisé/vide dans OsmAnd sous couvert d'un « ok » (et livrable
+        # trompeur). On refuse ; le finally ferme con_mb.
+        if total == 0:
+            print(f"  ERROR: {mbtiles_path.name} has 0 tiles - empty sqlitedb not written")
+            return None
+        # R2#11 : zooms LUS des tuiles quand les métadonnées manquent. Avant :
+        # 0/17 arbitraire → OsmAnd déclare une plage inexistante et ne trouve
+        # jamais les tuiles (couche sélectionnable mais vide).
+        if "minzoom" in meta and "maxzoom" in meta:
+            zoom_min = int(meta["minzoom"]); zoom_max = int(meta["maxzoom"])
+        else:
+            _zr = con_mb.execute(
+                "SELECT MIN(zoom_level), MAX(zoom_level) FROM tiles").fetchone()
+            zoom_min, zoom_max = int(_zr[0]), int(_zr[1])
 
         print(f"  SQLiteDB ← {mbtiles_path.name}  ({total:,} tiles)...", flush=True)
         t0 = time.time()
