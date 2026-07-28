@@ -3620,8 +3620,14 @@ def _configurer_cloud_cache(args):
     if _set:
         _windowed = (getattr(PROVIDER, "COG_WINDOWED", False)
                      or getattr(PROVIDER, "COPC_WINDOWED", False))
-        _set(None if (args.dossier_dalles or _windowed)
-             else DOSSIER_CACHE / LIDAR_SUBDIR)
+        _val = (None if (args.dossier_dalles or _windowed)
+                else DOSSIER_CACHE / LIDAR_SUBDIR)
+        _set(_val)
+        # Racine du cache .laz mémorisée pour --cleanup-keep-tiles : le cœur ne
+        # peut pas la relire sur PROVIDER (c'est le MODULE provider, qui ne
+        # ré-exporte pas l'attribut MUTABLE cloud_cache_dir de son _P ; un
+        # ré-export figerait la valeur à None, posée après par le setter).
+        args._cloud_cache_dir = _val
 
 
 def _download_to_tmp(url, chemin_tmp, timeout=60):
@@ -4681,9 +4687,8 @@ def _ensure_numba():
         return importlib.import_module("numba")
     except Exception as _e:
         raise RuntimeError(
-            "numba is required for this shading (hillshade/slope/SVF/openness) "
-            "and its automatic install failed. Install it manually: "
-            "pip install numba"
+            "numba est requis pour cet ombrage (hillshade/slope/SVF/openness) et "
+            "son installation automatique a échoué : pip install numba"
         ) from _e
 
 
@@ -11947,7 +11952,7 @@ def _run_split_priori(args, sous_zones, mode_desc, nom_zone, racine_pr,
                     # qu'on vient de déclarer au manifeste serait supprimé.
                     if getattr(args, "nettoyage_garder_dalles", False):
                         _keep = [_dossier_dalles_actif(args)]
-                        _cloud_cache = getattr(PROVIDER, "cloud_cache_dir", None)
+                        _cloud_cache = getattr(args, "_cloud_cache_dir", None)
                         if _cloud_cache is not None:
                             _keep.append(_cloud_cache)
                     else:

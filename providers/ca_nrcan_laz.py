@@ -125,6 +125,7 @@ method_label     = _P.method_label
 discover_dalles  = _P.discover_dalles
 pre_download     = _P.pre_download
 post_fetch       = _P.post_fetch
+cloud_path       = _P.cloud_path
 set_cloud_cache_dir = _P.set_cloud_cache_dir
 set_crs          = _P.set_crs          # posé par run dans telecharger_copc_fenetre
 # Internes exposés pour les tests

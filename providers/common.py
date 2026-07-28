@@ -1414,7 +1414,7 @@ class LazProvider:
                 pass
             import subprocess
             import sys
-            print(f"  LAZ: installation de {' '.join(pip_pkgs)} (une fois)...",
+            print(f"  LAZ: installing {' '.join(pip_pkgs)} (one-time)...",
                   flush=True)
             try:
                 subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pip_pkgs],
@@ -1423,7 +1423,7 @@ class LazProvider:
                 importlib.import_module(module)
                 return True
             except Exception as _e:
-                print(f"  LAZ: échec de l'install auto ({type(_e).__name__}: {_e})",
+                print(f"  LAZ: auto-install failed ({type(_e).__name__}: {_e})",
                       flush=True)
                 return False
 

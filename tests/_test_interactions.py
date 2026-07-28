@@ -1146,6 +1146,24 @@ with _tf.TemporaryDirectory() as _d:
     check("LAZ + keep-tiles : .tif ET .laz épargnés (2 caches), ombrage purgé",
           _tif.exists() and _laz.exists() and not _shade.exists())
 
+# Contrat MODULE provider LAZ ↔ cœur. Le cœur lit ces méthodes sur PROVIDER, qui
+# est le MODULE (pas l'instance _P), via getattr(..., None). Chaque module LAZ
+# doit donc les RÉ-EXPORTER depuis son _P. Bug vécu 2026-07-28 : cloud_path
+# oublié dans les 11 modules → getattr renvoie None en silence → le .laz n'entre
+# jamais au manifeste → --cleanup ne le purge jamais → disque saturé sur un
+# département. Le test _supprimer_fichiers ci-dessus (liste fournie À LA MAIN)
+# ne couvrait PAS cette découverte : d'où ce test au niveau du câblage.
+import glob as _glob, importlib as _il, os as _os
+_LAZ_CONTRAT = ("cloud_path", "post_fetch", "pre_download", "set_cloud_cache_dir")
+_laz_mods = sorted(_os.path.basename(_p)[:-3]
+                   for _p in _glob.glob(str(_ROOT / "providers" / "*_laz.py")))
+check("providers LAZ découverts (>= 10 jumeaux)", len(_laz_mods) >= 10, str(len(_laz_mods)))
+for _mn in _laz_mods:
+    _pm = _il.import_module("providers." + _mn)
+    _manque = [_a for _a in _LAZ_CONTRAT if not hasattr(_pm, _a)]
+    check("%s ré-exporte le contrat LAZ (cloud_path inclus)" % _mn,
+          not _manque, "manque: " + ",".join(_manque))
+
 print("== 9e. Uniformité « Source des données » sur les 4 onglets ==")
 # Chaque onglet producteur de carte expose D'ABORD sa source (quoi + d'où),
 # PUIS un cadre « 1 — Télécharger » qui ne garde que la mécanique du transfert
