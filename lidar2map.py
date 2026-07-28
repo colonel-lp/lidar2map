@@ -1283,7 +1283,7 @@ def _bootstrap_venv_si_besoin():
                        "rasterio", "fiona", "pywebview", "certifi"] + _gui_crit
     # Intel Macs require a specific Numba/LLVM combination because recent
     # releases do not provide compatible wheels.
-       if platform.system() == "Darwin" and platform.machine() == "x86_64":
+    if platform.system() == "Darwin" and platform.machine() == "x86_64":
         deps_optionnelles = [
         "osmium",
         "llvmlite==0.44.0",
@@ -1296,7 +1296,7 @@ def _bootstrap_venv_si_besoin():
        ] + _gui_opt    deps_pip = deps_critiques + deps_optionnelles
         print("  Installing dependencies in the venv (3-5 min)...")
 
-       def _pip_install(pkgs):
+      def _pip_install(pkgs):
         """Attempts pip install. Returns (success, stderr_msg)."""
         try:
             r = subprocess.run(
