@@ -550,6 +550,7 @@ import os
 import re
 import sys
 import ssl
+import platform
 
 # certifi fournit un bundle de certificats CA à jour, indispensable sur
 # Windows 11 et macOS où les certificats système sont parfois absents ou
@@ -582,28 +583,7 @@ except ImportError:
     # des certificats système périmés (Windows 11, macOS). Dès que certifi
     # est installé (relance auto du bootstrap ou lancement suivant), la
     # branche ci-dessus rétablit la vérification stricte.
-    _SSL_CTX_CERTIFI = None
     ssl._create_default_https_context = ssl._create_unverified_context
-
-
-def _restaurer_tls_strict():
-    """Rétablit la vérification TLS stricte si certifi est désormais importable.
-
-    Au tout premier lancement (certifi absent), le bloc d'import ci-dessus a posé
-    un contexte NON vérifiant, filet transitoire pour que pip passe. En mode auto
-    un re-exec du venv ré-importe certifi (vérification stricte d'emblée), mais en
-    mode pip il n'y a PAS de re-exec : sans ce rappel, tout le trafic HTTPS du run
-    (JRE, osmosis, tuiles) resterait non vérifié APRÈS l'install de certifi (R2#2).
-    Idempotent : no-op si le contexte est déjà strict."""
-    global _SSL_CTX_CERTIFI
-    try:
-        import certifi as _cf
-    except ImportError:
-        return
-    os.environ['SSL_CERT_FILE']      = _cf.where()
-    os.environ['REQUESTS_CA_BUNDLE'] = _cf.where()
-    _SSL_CTX_CERTIFI = ssl.create_default_context(cafile=_cf.where())
-    ssl._create_default_https_context = lambda: _SSL_CTX_CERTIFI
 
 
 # Forcer stdout/stderr en UTF-8 dès le démarrage. Sur Windows la code page
@@ -1175,7 +1155,10 @@ def _bootstrap_venv_si_besoin():
             pkg_map = {"PIL": "Pillow", "pyproj": "pyproj", "numpy": "numpy",
                        "scipy": "scipy", "ijson": "ijson",
                        "rasterio": "rasterio", "fiona": "fiona",
-                       "numba":    "numba",     "certifi": "certifi"}
+                       "numba": ("numba==0.61.2 llvmlite==0.44.0"
+                      if platform.system() == "Darwin" and platform.machine() == "x86_64"
+                      else "numba"),
+                       "certifi": "certifi"}
             pkgs_pip = [pkg_map.get(m, m) for m in deps_critiques]
             print()
             print("  ╔══════════════════════════════════════════════════════════════╗")
@@ -1286,24 +1269,35 @@ def _bootstrap_venv_si_besoin():
             print("  Install Python 3.8+ with the venv module.")
             sys.exit(1)
 
-    # Déps installées dans le venv. numba est inclus systématiquement :
-    # il accélère le calcul SVF de ×15 à ×50. osmium est inclus pour le
-    # pipeline OSM → GeoJSON (sans, ce pipeline n'est pas disponible).
-    # Si l'install d'une dep optionnelle (osmium, numba) échoue, on retry
-    # sans elle plutôt que de bloquer tout le script.
+    # Dependencies installed in the venv. numba is always included:
+    # it speeds up SVF calculation by 15x to 50x. osmium is included for the
+    # OSM → GeoJSON pipeline (without it, this pipeline is unavailable). 
+    # If the installation of an optional dependency (osmium, numba) fails, we retry
+    # without it rather than blocking the entire script. 
     #
-    # Deps GUI : spécifiques à la plateforme (Qt sur macOS/Linux).
-    # Traitées comme optionnelles au sens du retry (si PyQt6 échoue, on
-    # continue — la GUI sera non fonctionnelle mais le CLI marchera).
+    # GUI dependencies: platform-specific (Qt on macOS/Linux). 
+    # Treated as optional regarding the retry logic (if PyQt6 fails, we
+    # continue—the GUI will be non-functional, but the CLI will work).
     _gui_crit, _gui_opt = _gui_deps_plateforme()
     deps_critiques  = ["Pillow", "pyproj", "numpy", "scipy", "ijson",
                        "rasterio", "fiona", "pywebview", "certifi"] + _gui_crit
-    deps_optionnelles = ["osmium", "numba"] + _gui_opt
-    deps_pip = deps_critiques + deps_optionnelles
-    print("  Installing dependencies in the venv (3-5 min)...")
+    # Intel Macs require a specific Numba/LLVM combination because recent
+    # releases do not provide compatible wheels.
+       if platform.system() == "Darwin" and platform.machine() == "x86_64":
+        deps_optionnelles = [
+        "osmium",
+        "llvmlite==0.44.0",
+        "numba==0.61.2",
+        ] + _gui_opt
+        else:
+         deps_optionnelles = [
+          "osmium",
+          "numba",
+       ] + _gui_opt    deps_pip = deps_critiques + deps_optionnelles
+        print("  Installing dependencies in the venv (3-5 min)...")
 
-    def _pip_install(pkgs):
-        """Tente pip install. Retourne (success, stderr_msg)."""
+       def _pip_install(pkgs):
+        """Attempts pip install. Returns (success, stderr_msg)."""
         try:
             r = subprocess.run(
                 [str(venv_pip), "install", "-q",
@@ -1317,13 +1311,13 @@ def _bootstrap_venv_si_besoin():
 
     install_ok, err_msg = _pip_install(deps_pip)
     if not install_ok:
-        # Retry sans les deps optionnelles : si l'une d'elles est cassée
-        # (cas pyrosm 0.6.2 sur Python 3.12), on garde au moins le pipeline
-        # principal (LiDAR + raster).
+    # Retry without optional dependencies: if one of them is broken
+    # (e.g., pyrosm 0.6.2 on Python 3.12), we at least retain the
+    # main pipeline (LiDAR + raster).
         print("  Bulk install failed, retrying without optional deps...")
         install_ok, err_msg = _pip_install(deps_critiques)
         if install_ok:
-            # Tenter ensuite chaque optionnelle individuellement.
+            # Then try each optional item individually.
             print("  Critical deps installed. Trying optional deps one by one...")
             opt_failed = []
             for opt in deps_optionnelles:
@@ -1335,7 +1329,16 @@ def _bootstrap_venv_si_besoin():
                     print(f"    ✓ {opt} : OK")
             if opt_failed:
                 print(f"  ⚠ Optional deps not installed: {', '.join(opt_failed)}")
-                print(f"     Retry manuel possible : {venv_pip} install {' '.join(opt_failed)}")
+            if platform.system() == "Darwin" and platform.machine() == "x86_64":
+                print(
+                    f"     Retry manual possible : "
+                    f"{venv_pip} install llvmlite==0.44.0 numba==0.61.2"
+                )
+            else:
+                print(
+                    f"     Retry manual possible : "
+                    f"{venv_pip} install {' '.join(opt_failed)}"
+                )
         else:
             print("  ERROR installing critical deps in the venv:")
             print(f"  {err_msg}")
@@ -1344,32 +1347,33 @@ def _bootstrap_venv_si_besoin():
             sys.exit(1)
     print("  ✓ Dependencies installed.")
 
-    # Relancer le script avec le Python du venv
+    # Rerun the script with the Python of the venv
     print("  Relaunching in venv...")
     _relancer_dans_venv(venv_python, is_windows)
 
 
 def _relancer_dans_venv(venv_python, is_windows):
-    """Relance le script avec le Python du venv, comportement OS-spécifique.
+    """Relaunches the script using the venv's Python interpreter; behavior is OS-specific. 
 
-    Unix : os.execv remplace le process courant — le shell ne récupère
-           la main qu'après terminaison du child. C'est le comportement
-           attendu, économique en RAM (pas de double process).
+      Unix: os.execv replaces the current process—the shell only regains
+            control after the child process terminates. This is the
+            expected behavior and is RAM-efficient (no duplicate processes). 
 
-    Windows : os.execv y a un comportement différent de Unix — le parent
-              termine immédiatement et le child tourne en arrière-plan, ce
-              qui fait que le shell affiche son prompt avant la sortie du
-              child. Pour éviter cette confusion d'affichage, on utilise
-              subprocess.run + sys.exit : on attend la fin du child et on
-              propage son code retour avant de rendre la main au shell.
+    Windows: os.execv behaves differently than on Unix—the parent
+            terminates immediately while the child runs in the
+            background, causing the shell to display its prompt before
+            the child exits. To avoid this display confusion, we use
+            subprocess.run + sys.exit: we wait for the child to finish
+            and propagate its return code before returning control to
+            the shell. 
 
-              IMPORTANT : on passe explicitement stdout=sys.stdout et
-              stderr=sys.stderr au child, sinon quand le parent est lancé
-              par la GUI avec stdout=PIPE, le pipe ne se propage pas au
-              child venv, et la GUI ne voit jamais rien des messages que
-              le child écrit. Sans ce flush du parent au préalable, les
-              traces "[trace]" et "[init]" du parent se mélangent avec
-              celles du child à cause du buffering.
+  IMPORTANT: We explicitly pass stdout=sys.stdout and
+            stderr=sys.stderr to the child; otherwise, if the parent is
+            launched via a GUI with stdout=PIPE, the pipe is not
+            propagated to the venv child, and the GUI never sees the
+            messages written by the child. Without flushing the parent
+            first, the parent's "[trace]" and "[init]" logs get mixed
+            with the child's logs due to buffering.
     """
     if is_windows:
         try:
@@ -1646,9 +1650,6 @@ def _bootstrap_environnement():
         _bootstrap_pip()
     if mode != "none":
         _installer_deps()
-        # certifi vient (peut-être) d'être installé : rétablir la vérification
-        # TLS stricte pour le reste du run (surtout mode pip, sans re-exec) (R2#2).
-        _restaurer_tls_strict()
 
 
 # Petit wrapper pour conserver _bootstrap_venv_si_besoin sans paramètre côté
@@ -3588,23 +3589,6 @@ def _rglob_tif_robuste(dossier):
     return resultats
 
 
-def _nom_dalle_sur(nom):
-    """True si `nom` est un BASENAME sûr (pas de traversée de chemin).
-
-    Les noms de dalles proviennent d'un index DISTANT du fournisseur (WFS/JSON/
-    ATOM). Un nom piégé (`../…`, séparateur, chemin absolu ou lettre de lecteur)
-    servirait à écrire HORS du cache via `dossier / nom` (traversée, R2#3). On
-    exige un composant de chemin unique, non `.`/`..`, sans NUL."""
-    if not nom or nom in (".", ".."):
-        return False
-    s = str(nom)
-    if "\x00" in s or "/" in s or "\\" in s:
-        return False
-    if os.path.isabs(s) or os.path.splitdrive(s)[0]:
-        return False
-    return os.path.basename(s) == s
-
-
 def chemin_dalle(dossier_dalles, nom):
     """
     Retourne le Path complet d'une dalle dans la structure sous-dossiers.
@@ -3614,12 +3598,6 @@ def chemin_dalle(dossier_dalles, nom):
     Fallback transparent : si la dalle existe à la racine (ancienne structure),
     retourne le chemin racine. Sinon retourne le chemin sous-dossier.
     """
-    # Invariant de sécurité : jamais construire un chemin à partir d'un nom qui
-    # échapperait le dossier (traversée, R2#3). Lève plutôt que de retourner un
-    # chemin hors cache ; les boucles de consommation pré-filtrent pour dégrader
-    # proprement (cf. _telecharger_dalles_zone / _lister_dalles_zone).
-    if not _nom_dalle_sur(nom):
-        raise ValueError(f"unsafe tile name (path traversal): {nom!r}")
     # Chemin racine (ancienne structure)
     chemin_racine = dossier_dalles / nom
     if chemin_racine.exists():
@@ -3897,17 +3875,6 @@ def telecharger_dalle_directe(nom, url_wms, dossier, ecraser=False, compresser=F
                 taille = _download_to_tmp(url_wms, chemin_tmp, timeout=(10, 45))
                 if taille == 0:
                     chemin_tmp.unlink(missing_ok=True)
-                    # 404 propre. Provider à découverte EXACTE (index WFS/STAC/
-                    # registre : la dalle est PROMISE) → un 404 = index périmé ou
-                    # panne serveur, PAS une absence légitime (R1#8). On lève →
-                    # retry (un 404 sous throttle est parfois transitoire, cf. le
-                    # 400 IGN) → après épuisement, 'erreur' VISIBLE → l'invariant
-                    # erreur>0 stoppe le chunk (plus de trou marqué complet). En
-                    # découverte GRILLE (défaut), une cellule de bord 404 reste
-                    # une absence normale.
-                    if getattr(PROVIDER, "DISCOVER_EXACT", False):
-                        raise IOError("HTTP 404 sur dalle indexée "
-                                      "(provider à découverte exacte)")
                     return "absent"
                 if taille < SEUIL_DALLE_VALIDE:
                     with open(chemin_tmp, "rb") as _fh:
@@ -8640,21 +8607,6 @@ class ZoneHorsCouvertureWMTS(RuntimeError):
     pass
 
 
-def _jpeg_quality_sortie(img_fmt, formats_image, qualite_image):
-    """Qualité de re-encodage PNG→JPEG côté client, ou None si aucun re-encodage.
-
-    SOURCE DE VÉRITÉ UNIQUE partagée par la passe simple (main_wmts) et le split
-    (_traiter_bbox_wmts) : les deux jumeaux avaient divergé (le split convertissait
-    toujours PNG→JPEG en ignorant --image-format png, R2#14). Règles :
-      - serveur JPEG natif (ortho, scan*…) → None (jamais reconverti ; --image-format
-        png sur ces couches est signalé puis ignoré, cf. la note dans main_wmts) ;
-      - PNG natif + --image-format png → None (l'utilisateur garde le PNG lossless) ;
-      - PNG natif + --image-format jpeg/auto → la qualité demandée (conversion).
-    """
-    _native_png = img_fmt.lower() in ("image/png", "png")
-    return qualite_image if (_native_png and formats_image != "png") else None
-
-
 def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
                     zoom_min, zoom_max, layer, style, img_fmt,
                     apikey, apikey_requis, workers,
@@ -8692,17 +8644,6 @@ def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
     # Calculer _convert_png ici — utilisé pour _meta_fmt et dans _dl
     _convert_png = (jpeg_quality is not None
                     and img_fmt.lower() in ("image/png", "png"))
-    # Downgrade PROPRE si Pillow est absent : garder le PNG natif ET l'étiqueter
-    # png (cohérent), au lieu de télécharger tout puis rater chaque conversion.
-    # Le cas SYSTÉMATIQUE est neutralisé ici ; il ne reste dans _dl que l'échec
-    # SPORADIQUE (une tuile corrompue), qui doit lever et non mentir (R2#15).
-    if _convert_png:
-        try:
-            from PIL import Image as _PILchk  # noqa: F401
-        except ImportError:
-            print("  WARNING: Pillow unavailable, PNG->JPEG conversion disabled "
-                  "(tiles kept as PNG, metadata stays consistent).")
-            _convert_png = False
     _meta_fmt    = "jpeg" if _convert_png else fmt_ext
 
     con = sqlite3.connect(str(chemin_part))
@@ -8809,11 +8750,6 @@ def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
             _cache_file = _cache_path(z, x, y)
             if _cache_file.exists():
                 data = _cache_file.read_bytes()
-                # Cache d'un run buggé : un blob PNG écrit sous un nom .jpeg
-                # (ancien fallback silencieux) mentait sur le format. On le
-                # rejette pour re-télécharger+convertir proprement (R2#15).
-                if _convert_png and data[:3] != b'\xff\xd8\xff':
-                    data = None
         if data is None:
             data = telecharger_tuile(z, x, y, layer, style, img_fmt,
                                      apikey, apikey_requis)
@@ -8824,15 +8760,8 @@ def generer_mbtiles_wmts(chemin, tuiles_iter, total, nom_zone, fmt_ext,
                     buf = io.BytesIO()
                     img.save(buf, "JPEG", quality=jpeg_quality, optimize=True)
                     data = buf.getvalue()
-                except Exception as _e_conv:
-                    # Ne PAS garder le PNG sous un contrat jpeg (métadonnées
-                    # format=jpeg + cache .jpeg) : tuile mal étiquetée illisible
-                    # pour un lecteur strict. On lève → comptée en 'erreurs'
-                    # (drop honnête). Le cas systématique (Pillow absent) est
-                    # déjà neutralisé en amont, ne reste que le sporadique (R2#15).
-                    raise IOError(f"PNG->JPEG conversion failed for tile "
-                                  f"{z}/{x}/{y}: {type(_e_conv).__name__}: "
-                                  f"{_e_conv}") from _e_conv
+                except Exception:
+                    pass  # fallback : garder le PNG original
             # Écrire dans le cache — écriture ATOMIQUE (temp + os.replace).
             # Une écriture interrompue (Ctrl+C, crash, disque plein) ne doit pas
             # laisser une tuile tronquée : au run suivant _cache_file.exists()
@@ -9097,36 +9026,6 @@ def _empty_jpeg_256():
                 b'\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJ'
                 b'STUVWXYZ\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xf8k\xff\xd9')
 
-def _blob_vers_jpeg(blob, quality=85):
-    """Convertit un blob de tuile en JPEG si besoin. Le format RMAP CompeGPS/
-    TwoNav ne stocke QUE du JPEG (offsets nommés jpegOffsets, tag 7) : recopier
-    un PNG (reliefs LRM/SVF/RRIM) tel quel produit un RMAP illisible (R2#7).
-
-    - déjà JPEG (magic FF D8 FF) → renvoyé inchangé (chemin rapide, pas de
-      décodage : les sources JPEG scan25/ortho ne paient rien) ;
-    - PNG/autre → décodé via PIL puis ré-encodé ; l'alpha est aplati sur le gris
-      des tuiles vides (JPEG n'a pas de canal alpha) ;
-    - indécodable → None (l'appelant substitue la tuile vide).
-    """
-    if blob[:3] == b'\xff\xd8\xff':       # déjà JPEG : rien à faire
-        return blob
-    try:
-        from PIL import Image as _Img
-        img = _Img.open(io.BytesIO(blob))
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGBA")
-            fond = _Img.new("RGB", img.size, (180, 180, 180))
-            fond.paste(img, mask=img.split()[-1])   # alpha comme masque
-            img = fond
-        else:
-            img = img.convert("RGB")
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=quality, optimize=True)
-        return buf.getvalue()
-    except Exception:
-        return None
-
-
 # ── Fonction principale ────────────────────────────────────────────────────────
 
 def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
@@ -9225,8 +9124,6 @@ def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
 
         # ── Phase 2 : écriture séquentielle — offsets enregistrés à la volée ──
         zoom_hdr_offset = {}
-        _n_reenc     = 0   # tuiles PNG ré-encodées en JPEG (R2#7)
-        _n_illisible = 0   # tuiles indécodables remplacées par la tuile vide
 
         largeur = 30
         done    = 0
@@ -9294,19 +9191,8 @@ def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
                                 suivant = cur_t.fetchone()
                             if (suivant is not None and suivant[0] == col
                                     and suivant[1] == y_tms):
-                                _blob = suivant[2]
+                                jpeg = suivant[2]
                                 suivant = cur_t.fetchone()
-                                # RMAP = JPEG uniquement : un PNG (relief) doit
-                                # être ré-encodé, sinon TwoNav ne lit pas (R2#7).
-                                if _blob[:3] == b'\xff\xd8\xff':
-                                    jpeg = _blob
-                                else:
-                                    jpeg = _blob_vers_jpeg(_blob)
-                                    if jpeg is None:
-                                        jpeg = EMPTY_JPEG
-                                        _n_illisible += 1
-                                    else:
-                                        _n_reenc += 1
                             else:
                                 jpeg = EMPTY_JPEG
 
@@ -9361,11 +9247,6 @@ def generer_rmap_depuis_mbtiles(mbtiles_path, ecraser=False):
         elapsed   = int(time.time() - t0)
         taille_mo = rmap.stat().st_size / 1e6
         print(f"\n  {rmap.name} : {taille_mo:.0f} MB  {_hms(elapsed)}")
-        if _n_reenc:
-            print(f"  Note: {_n_reenc:,} PNG tile(s) re-encoded to JPEG "
-                  f"(RMAP is a JPEG-only format; some quality loss expected)")
-        if _n_illisible:
-            print(f"  WARNING: {_n_illisible:,} undecodable tile(s) replaced by blank")
         return rmap
     finally:
         # Garantit la fermeture de la connexion SQLite même sur exception
@@ -9723,30 +9604,6 @@ def _nettoyer_osmosis_temp_orphelins(verbose=False, min_age_s=300):
     return nb, bytes_freed
 
 
-# Grammaire d'un filtre osmosis `accept-ways` : `clé` ou `clé=valeur[,valeur…]`.
-# Les clés/valeurs OSM légitimes n'utilisent QUE lettres (unicode, accents ok),
-# chiffres, `_ : - . *` (wildcard) et l'espace. Aucun métacaractère shell n'y a
-# sa place. Sur Windows l'osmosis est un .bat lancé via cmd.exe (shell=True) : une
-# valeur `--layer` contenant `& | > ^ " %`… serait interprétée par le shell
-# (injection de commande, R2#1). On valide en amont par ALLOWLIST (rejet strict)
-# plutôt que d'échapper au cas par cas : plus sûr et indépendant de la plateforme.
-_OSM_TAG_RE = re.compile(r"^[\w:][\w:.\-*/+ ]*(=[\w:.\-*/+, ]*)?$", re.UNICODE)
-
-
-def _valider_osm_tags(osm_tags):
-    """Rejette tout token `--layer` hors grammaire osmosis (anti-injection, R2#1).
-
-    Lève SystemExit(1) au premier token invalide, avec un message clair pointant
-    le token fautif. Retourne la liste inchangée si tout est valide."""
-    for _t in osm_tags:
-        if not _OSM_TAG_RE.match(str(_t)):
-            print(f"  ERROR: invalid --layer filter {str(_t)!r} : only "
-                  f"osmosis tag filters are allowed (key or key=value[,value]), "
-                  f"no shell metacharacters.")
-            sys.exit(1)
-    return osm_tags
-
-
 def generer_carte_osm(bbox_wgs84, dossier_ville, nom_zone, osm_pbf,
                       osm_tags=None, export_geojson=True, ecraser_tuiles=False,
                       skip_bbox=False, geojson_formats=None):
@@ -9844,7 +9701,6 @@ def generer_carte_osm(bbox_wgs84, dossier_ville, nom_zone, osm_pbf,
                     "natural=water", "natural=coastline",
                     "waterway=river", "waterway=stream", "waterway=canal"]
     osm_tags = list(dict.fromkeys(osm_tags))
-    _valider_osm_tags(osm_tags)   # anti-injection avant l'osmosis shell (R2#1)
     print(f"  Tags : {' '.join(osm_tags)}", flush=True)
 
     chemin_pbf_filtre = dossier_ville / f"{nom_zone}_filtered.pbf"
@@ -11428,13 +11284,11 @@ def _lister_dalles_zone(noms_attendus, dossier_dalles, dossier_ville, bbox):
     # l'ancien scan était en O(chunks × fichiers) ; désormais O(noms de la zone).
     dalles_ombrages = []
     for nom in noms_zone:
-        # chemin_dalle lève ValueError sur un nom piégé (dalles_zone.txt altéré) :
-        # on saute au lieu de crasher (R2#3, défense en profondeur).
+        p = chemin_dalle(dossier_dalles, nom)
         try:
-            p = chemin_dalle(dossier_dalles, nom)
             if p.exists() and p.stat().st_size > SEUIL_DALLE_VALIDE:
                 dalles_ombrages.append(p)
-        except (OSError, ValueError):
+        except OSError:
             continue
     return sorted(dalles_ombrages)
 
@@ -11471,16 +11325,6 @@ def _telecharger_dalles_zone(dalles_dict, bbox, dossier_dalles, dossier_ville, a
     """
     ok = skip = absent = erreur = 0
     a_telecharger = []
-
-    # Sécurité : `dalles_dict` vient de PROVIDER.discover_dalles (index DISTANT).
-    # On écarte tout nom qui n'est pas un basename sûr AVANT de construire un
-    # chemin local, sinon une entrée piégée (`../…`) écrirait hors cache (R2#3).
-    _dict_sur = {n: u for n, u in dalles_dict.items() if _nom_dalle_sur(n)}
-    if len(_dict_sur) < len(dalles_dict):
-        _n_drop = len(dalles_dict) - len(_dict_sur)
-        print(f"  WARNING: {_n_drop} tile(s) with unsafe name(s) skipped "
-              f"(path traversal guard)")
-    dalles_dict = _dict_sur
 
     # Overwrite = VRAI re-download de la source (choix Nico : --download-overwrite
     # doit re-tirer, LAZ inclus). Les deux flags convergent (--download-force et
@@ -12334,10 +12178,8 @@ def _traiter_bbox_wmts(args, bbox_wgs84, nom_z, nom_zone_base, layer, style, img
             chemin_mbtiles = dossier / f"{nom_fichier}.mbtiles"
             dossier_cache  = DOSSIER_CACHE / "ign_raster"
             dossier_cache.mkdir(parents=True, exist_ok=True)
-            # Source de vérité UNIQUE (fin du drift jumeau R2#14) : le split
-            # honore --image-format png comme la passe simple.
-            _jpeg_q = _jpeg_quality_sortie(img_fmt, args.formats_image,
-                                           args.qualite_image)
+            _jpeg_q = (args.qualite_image
+                       if img_fmt.lower() in ("image/png", "png") else None)
             _mbt_neuf = _mbtiles_a_regenerer(chemin_mbtiles, args.tuiles_ecraser)
             if _mbt_neuf:
                 generer_mbtiles_wmts(
@@ -12862,26 +12704,12 @@ def main_decouper():
     sorties = decouper_mbtiles(src, cote_km=args.split_width,
                                n_cols=args.cols, n_rows=args.rows,
                                ecraser=args.tuiles_ecraser)
-    _nb_ko = 0
     for sf in sorties:
         # Livrables finaux régénérés d'office (cf. _convertir_un_mbtiles).
-        _conv_ok = True
-        if args.rmap:
-            _conv_ok = (generer_rmap_depuis_mbtiles(sf, ecraser=True) is not None) and _conv_ok
-        if args.sqlitedb:
-            _conv_ok = (generer_sqlitedb_depuis_mbtiles(sf, ecraser=True) is not None) and _conv_ok
-        # Ne PAS supprimer le mbtiles intermédiaire si une conversion demandée a
-        # échoué : sinon on efface la seule donnée survivante (R2#6). On le garde
-        # comme filet, même quand l'utilisateur n'avait pas demandé le mbtiles.
-        if not _conv_ok:
-            _nb_ko += 1
-            print(f"  WARNING: conversion(s) failed for {sf.name}; .mbtiles kept.")
-            continue
+        if args.rmap:     generer_rmap_depuis_mbtiles(sf, ecraser=True)
+        if args.sqlitedb: generer_sqlitedb_depuis_mbtiles(sf, ecraser=True)
         if not args.mbtiles and sf != src and sf.exists():
             sf.unlink()
-    if _nb_ko:
-        print(f"\n  Splitting done with {_nb_ko} conversion failure(s).")
-        sys.exit(1)
     print("\n  Splitting done.")
 
 
@@ -13058,16 +12886,6 @@ Examples:
     # dans le MBTiles via re-encodage côté client (cf. _jpeg_q ci-dessous).
     fmt_ext = "jpg" if "jpeg" in img_fmt else "png"
 
-    # --image-format png sur une couche nativement JPEG (ortho, scan*, étatmajor) :
-    # convertir JPEG→PNG ne restaure aucune qualité (PNG lossless d'une image
-    # lossy = fichier bien plus lourd, zéro gain). On garde le JPEG en le
-    # SIGNALANT, au lieu d'ignorer le flag en silence (R2#14). Le sens inverse
-    # (PNG natif → jpeg) fonctionne, lui, via _jpeg_q.
-    if "jpeg" in img_fmt and args.formats_image == "png":
-        print(f"  Note: layer '{args.couche}' is served as JPEG; --image-format "
-              f"png ignored (PNG would only bloat the file, no quality gain). "
-              f"Keeping JPEG.")
-
     # ── Plafonnement zoom selon capacités réelles de la couche ───────────────
     # IGN : GetCapabilities WMTS. XYZ (naip…) : table _XYZ_ZOOM_LIMITS.
     # AVANT le bloc de découpage a-priori (qui `return`) : le capping vivait
@@ -13172,8 +12990,11 @@ Examples:
     #     refuse explicitement la conversion → on garde le PNG natif)
     #   - PNG natif + --formats-image jpeg/auto : _jpeg_q = qualité demandée
     #     → conversion PNG → JPEG (gain ~3-5× sur la taille MBTiles)
-    # Source de vérité UNIQUE partagée avec le split _traiter_bbox_wmts (R2#14).
-    _jpeg_q = _jpeg_quality_sortie(img_fmt, args.formats_image, args.qualite_image)
+    _native_png = img_fmt.lower() in ("image/png", "png")
+    if _native_png and args.formats_image != "png":
+        _jpeg_q = args.qualite_image
+    else:
+        _jpeg_q = None
 
     # Le MBTiles source doit être (re)généré si :
     #   - il n'existe pas encore
@@ -14567,20 +14388,13 @@ def _decouvrir_url_bdtopo_gpkg(num_dep):
     return None, None
 
 
-def _telecharger_bdtopo_gpkg(num_dep, url, nom_ressource, ecraser=False):
-    """Télécharge et extrait le .7z BD TOPO, met le .gpkg en cache. Retourne Path ou None.
-
-    ecraser=True (--download-overwrite) force le re-téléchargement même si un
-    GPKG est déjà en cache (sinon un GPKG périmé/corrompu était réutilisé
-    indéfiniment malgré l'option, R2#31)."""
+def _telecharger_bdtopo_gpkg(num_dep, url, nom_ressource):
+    """Télécharge et extrait le .7z BD TOPO, met le .gpkg en cache. Retourne Path ou None."""
     dep_padded = str(num_dep).zfill(3)
     cache_dir  = DOSSIER_CACHE / "bdtopo"
     cache_dir.mkdir(parents=True, exist_ok=True)
     gpkg_path = cache_dir / f"{nom_ressource}.gpkg"
 
-    if ecraser and gpkg_path.exists():
-        gpkg_path.unlink()
-        print(f"  GPKG cache: {gpkg_path.name} -> overwrite (re-download)", flush=True)
     if gpkg_path.exists() and gpkg_path.stat().st_size > 10_000_000:
         print(f"  GPKG cache: {gpkg_path.name} "
               f"({gpkg_path.stat().st_size/1e6:.0f} MB) reused", flush=True)
@@ -14991,7 +14805,7 @@ def _telecharger_bdtopo_bulk(num_dep, couches_resolues, nom_zone,
     url, nom = _decouvrir_url_bdtopo_gpkg(num_dep)
     if not url:
         return None
-    gpkg_path = _telecharger_bdtopo_gpkg(num_dep, url, nom, ecraser=ecraser)
+    gpkg_path = _telecharger_bdtopo_gpkg(num_dep, url, nom)
     if not gpkg_path:
         return None
 
@@ -15118,30 +14932,6 @@ def main_wfs():
         )
         if sorties_bulk is not None:
             sorties = sorties_bulk
-            # Bulk PARTIEL : certaines couches ne sont pas dans le GPKG (ou
-            # extraction ratée). On les rejoue en WFS pagination au lieu de les
-            # abandonner (R2#31). Nommage BDTOPO_V3 identique bulk/WFS
-            # (`{nom_zone}_ign_{suf}`) → pas de doublon, pas d'écrasement.
-            if len(sorties_bulk) < len(couches_resolues):
-                _couvertes = {Path(p).name for p in sorties_bulk}
-                _ratees = []
-                for _tn, _desc in couches_resolues:
-                    _lk = _tn.split(":")[-1].lower()
-                    if (f"{nom_zone}_ign_{_lk}.geojson.gz"  not in _couvertes and
-                            f"{nom_zone}_ign_{_lk}.geojson" not in _couvertes):
-                        _ratees.append((_tn, _desc))
-                if _ratees:
-                    print(f"  Bulk covered {len(sorties_bulk)}/{len(couches_resolues)} "
-                          f"layers; retrying {len(_ratees)} via WFS pagination...")
-                    for _tn, _desc in _ratees:
-                        print(f"\n  [{_desc}]")
-                        _f = telecharger_wfs(
-                            _tn, lon_min, lat_min, lon_max, lat_max,
-                            nom_zone, dossier,
-                            ecraser_telechargement=args.telechargement_ecraser,
-                            formats=_gj_formats)
-                        if _f:
-                            sorties.append(_f)
         else:
             print("  Falling back to WFS pagination...")
 
@@ -15226,19 +15016,15 @@ def main_wfs():
     print(f"  Done! Folder: {dossier}")
     for s in sorties:
         print(f"  → {s}")
+    _historique_depuis_argv(elapsed, str(dossier))
     # Échec partiel (couches manquantes) = échec visible : les livrables
-    # produits restent, mais GUI/scripts/CI doivent le voir. On finalise
-    # l'historique avec le statut RÉEL (ko si partiel) AVANT de lever, sinon
-    # l'entrée resterait marquée 'ok' pour un run incomplet (R2#50).
-    _wfs_partiel = len(sorties) < len(couches_resolues)
-    _historique_depuis_argv(elapsed, str(dossier),
-                            statut=("ko" if _wfs_partiel else "ok"))
-    # RuntimeError et PAS sys.exit(1) : SystemExit traverserait la boucle
-    # multi-départements (qui ne rattrape que Exception, exprès) et tuerait les
-    # départements suivants ; l'Exception y est rattrapée → dept marqué KO, on
-    # continue, et le code global non-zéro vient du bilan _deps_ko. En
-    # mono-département elle remonte au top-level → code non-zéro aussi.
-    if _wfs_partiel:
+    # produits restent, mais GUI/scripts/CI doivent le voir. RuntimeError et
+    # PAS sys.exit(1) : SystemExit traverserait la boucle multi-départements
+    # (qui ne rattrape que Exception, exprès) et tuerait les départements
+    # suivants ; l'Exception y est rattrapée → dept marqué KO, on continue,
+    # et le code global non-zéro vient du bilan _deps_ko. En mono-département
+    # elle remonte au top-level → code non-zéro aussi.
+    if len(sorties) < len(couches_resolues):
         raise RuntimeError(f"{len(couches_resolues) - len(sorties)} WFS "
                            f"layer(s) failed - rerun to retry them")
 
@@ -15632,7 +15418,7 @@ def _lire_geojson(chemin):
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def fusionner_geojson(fichiers, sortie, fichiers_ignores=None):
+def fusionner_geojson(fichiers, sortie):
     """
     Fusionne plusieurs GeoJSON en un seul FeatureCollection — STREAMING.
 
@@ -15640,12 +15426,8 @@ def fusionner_geojson(fichiers, sortie, fichiers_ignores=None):
     écriture incrémentale dans le .gz au fil de l'eau. La bbox WGS84 est
     calculée pendant la passe d'écriture (pas de re-lecture nécessaire).
 
-    fichiers         : liste de Path ou str
-    sortie           : Path de sortie
-    fichiers_ignores : si une liste est fournie, les noms des sources SAUTÉES
-                       (absentes ou illisibles) y sont ajoutés — l'appelant peut
-                       ainsi distinguer une fusion COMPLÈTE d'une fusion PARTIELLE
-                       et sortir en erreur au lieu d'annoncer un faux succès (R2#37).
+    fichiers : liste de Path ou str
+    sortie   : Path de sortie
     Retourne (Path créé, bbox|None) — bbox = (lon_min, lat_min, lon_max, lat_max),
     ou (None, None) si aucune feature à fusionner.
     """
@@ -15736,35 +15518,18 @@ def fusionner_geojson(fichiers, sortie, fichiers_ignores=None):
         if _has_ijson:
             opener = ((lambda: gzip.open(p, "rb")) if str(p).endswith(".gz")
                       else (lambda: open(p, "rb")))
-            _n_yield = 0
             try:
                 with opener() as fh:
                     for feat in ijson.items(fh, "features.item"):
-                        _n_yield += 1
                         yield source, feat
                 return
-            # Rattrape AUSSI les erreurs de parsing ijson (IncompleteJSONError,
-            # etc. — pas des ValueError) : sans ça un seul source corrompu faisait
-            # crasher toute la fusion au lieu d'être sauté (R2#37). KeyboardInterrupt
-            # est une BaseException → non capturée, Ctrl+C remonte toujours.
-            except Exception as e:
-                if _n_yield:
-                    # Des features ont déjà été émises → NE PAS relire en RAM
-                    # (relecture depuis le début = doublons). Source tronquée,
-                    # marquée ignorée (fusion partielle visible côté appelant).
-                    print(f"  WARNING: {p.name} truncated after {_n_yield} "
-                          f"features ({e}) - partial source skipped")
-                    if fichiers_ignores is not None:
-                        fichiers_ignores.append(p.name)
-                    return
+            except (OSError, ValueError) as e:
                 print(f"  WARNING: {p.name} streaming failed ({e}) - RAM fallback")
-        # Fallback non-streaming (seulement si le streaming n'a rien émis)
+        # Fallback non-streaming
         try:
             data = _lire_geojson(p)
         except Exception as e:
             print(f"  WARNING: {p.name} illisible ({e}) - skipped")
-            if fichiers_ignores is not None:
-                fichiers_ignores.append(p.name)
             return
         for feat in data.get("features", []):
             yield source, feat
@@ -15788,8 +15553,6 @@ def fusionner_geojson(fichiers, sortie, fichiers_ignores=None):
                     p = p_gz
             if not p.exists():
                 print(f"  WARNING: {p.name} not found - skipped")
-                if fichiers_ignores is not None:
-                    fichiers_ignores.append(p.name)
                 continue
 
             n_fichier = 0
@@ -15891,15 +15654,7 @@ Examples:
     parser.add_argument("--vector-simplify", "--simplification-vecteur", type=float, default=None,
                         metavar="M", dest="simplification_vecteur",
                         help="Douglas-Peucker epsilon in metres (default: auto from area).")
-    args, _extra = parser.parse_known_args()  # tolère d'éventuels tokens globaux
-    # Signaler les options non reconnues (typos) au lieu de les avaler en
-    # silence : `--outut-file x` était sinon ignoré et la sortie retombait sur
-    # le nom par défaut sans prévenir (R2#37). On ne signale que les tokens en
-    # `--…` (une valeur isolée peut être un reliquat légitime).
-    _opts_inconnues = [t for t in _extra if t.startswith("--")]
-    if _opts_inconnues:
-        print("  WARNING: unrecognized option(s) ignored (typo?): "
-              + " ".join(_opts_inconnues))
+    args, _ = parser.parse_known_args()  # ignorer --zone-* et autres args globaux
     # Crash-safe : sauver l'entrée 'en cours' AVANT toute opération longue.
     _historique_debut()
 
@@ -15938,10 +15693,8 @@ Examples:
         print(f"  + {f}")
     print(f"  → {sortie}")
 
-    _ignores = []
-    fusion_result = fusionner_geojson(fichiers, sortie, fichiers_ignores=_ignores)
-    _fusion_ok = bool(fusion_result and fusion_result[0] is not None)
-    if _fusion_ok:
+    fusion_result = fusionner_geojson(fichiers, sortie)
+    if fusion_result and fusion_result[0] is not None:
         result, bbox = fusion_result
         fmts = [f.lower() for f in args.formats_fichier]
         # Générer le .map Mapsforge si demandé
@@ -15973,18 +15726,7 @@ Examples:
                 result, sortie.parent / f"{nom_zone}_transparent.sqlitedb",
                 _zmin, _zmax, ecraser=True, bbox_wgs84=bbox)
         print(f"\n  Done in {_hms(int(time.time()-t_debut))}")
-    else:
-        print("  ERROR: merge produced no output (no readable source feature)")
-    # Fusion PARTIELLE (sources sautées) = échec visible : le livrable produit
-    # reste, mais GUI/scripts/CI doivent le voir (famille succès silencieux, R2#37).
-    if _ignores:
-        print(f"\n  WARNING: {len(_ignores)} source(s) skipped "
-              f"(missing/unreadable): " + ", ".join(_ignores))
-    _echec = (not _fusion_ok) or bool(_ignores)
-    _historique_depuis_argv(int(time.time()-t_debut),
-                            statut=("ko" if _echec else "ok"))
-    if _echec:
-        sys.exit(1)
+    _historique_depuis_argv(int(time.time()-t_debut))
 
 
 # ── Persistence d'historique 'crash-safe' ──────────────────────────────────
