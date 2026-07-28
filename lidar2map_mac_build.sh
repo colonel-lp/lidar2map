@@ -54,6 +54,19 @@ fi
 ONEDIR_SIZE=$(du -sm "$ONEDIR_ROOT" | cut -f1)
 echo "    Onedir : ${ONEDIR_SIZE} Mo"
 
+# Fix duplicate libtiff conflict (pyproj ships an older incompatible copy)
+echo "    Fixing libtiff conflict..."
+
+TIFF_SRC="$ONEDIR_ROOT/_internal/rasterio/.dylibs/libtiff.6.dylib"
+TIFF_DST="$ONEDIR_ROOT/_internal/pyproj/.dylibs/libtiff.6.dylib"
+
+if [ -f "$TIFF_SRC" ] && [ -f "$TIFF_DST" ]; then
+    cp -f "$TIFF_SRC" "$TIFF_DST"
+    echo "    Replaced pyproj libtiff with rasterio libtiff"
+else
+    echo "    WARNING: libtiff files not found, skipping"
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Zip du onedir
 # ─────────────────────────────────────────────────────────────────────────────
