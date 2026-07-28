@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup_build_mac.sh — Prepare un Mac ARM64 pour builder LIDAR2MAP.app
+# setup_build_mac.sh — Prepare un macOS x86_64 pour builder LIDAR2MAP.app
 #
 # 1. Installe Python 3.12 si absent (depuis python.org)
 # 2. Lance lidar2map.py --installer-deps -> installe toutes les dependances
