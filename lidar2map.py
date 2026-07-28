@@ -1289,7 +1289,7 @@ def _bootstrap_venv_si_besoin():
         "llvmlite==0.44.0",
         "numba==0.61.2",
         ] + _gui_opt
-        else:
+     else:
          deps_optionnelles = [
           "osmium",
           "numba",
