@@ -1454,6 +1454,12 @@ def _installer_deps():
         if not _module_present(_mod):
             if pkg not in deps:
                 deps.append(pkg)
+    # Pin numba for Intel macOS + Python 3.12
+    if platform.system() == "Darwin" and platform.machine() == "x86_64":
+        deps = [
+            d.replace("numba", "numba==0.61.2") if d == "numba" else d
+            for d in deps
+        ]
 
     if not deps:
         return
